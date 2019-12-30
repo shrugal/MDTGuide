@@ -1,0 +1,11 @@
+## Interface: 80205
+## Title: MDTGuide
+## Notes: Guide mode for Method Dungeon Tools.
+## Notes-deDE: Guide-Modus für Method Dungeon Tools.
+## Version: @project-version@
+
+MDTGuide.lua
+
+#@do-not-package@
+## Version: 0-dev0
+#@end-do-not-package@

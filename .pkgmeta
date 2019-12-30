@@ -1,0 +1,7 @@
+package-as: MDTGuide
+manual-changelog:
+  filename: CHANGES.md
+  markup-type: markdown
+license-output: LICENSE
+enable-nolib-creation: no
+  

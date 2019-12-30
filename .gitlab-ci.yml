@@ -1,0 +1,54 @@
+image: registry.gitlab.com/shrugal/wow-packager:latest
+
+stages:
+  - build
+  - deploy
+
+.releases: &releases
+  - /^\d[\d\.]*(-(alpha|beta)\d+)?$/
+
+build:
+  only: *releases
+  stage: build
+  script:
+    - release.sh -d
+  artifacts:
+    paths:
+      - .release/MDTGuide/
+      - .release/*.zip
+
+ curseforge:
+  only: *releases
+  stage: deploy
+  environment:
+    name: CurseForge
+    url: https://wow.curseforge.com/projects/mdtguide
+  script:
+    - release.sh -ocelzWHG
+
+wowinterface:
+  only: *releases
+  stage: deploy
+  environment:
+    name: WoWInterface
+    url: https://www.wowinterface.com/downloads/info24667-MDTGuide.html
+  script:
+    - release.sh -ocelzLHG
+
+github:
+  only: *releases
+  stage: deploy
+  environment:
+    name: GitHub
+    url: https://github.com/shrugal/MDTGuide/releases
+  script:
+    - release.sh -ocelzLWG
+
+gitlab:
+  only: *releases
+  stage: deploy
+  environment:
+    name: GitLab
+    url: https://gitlab.com/shrugal/MDTGuide/releases
+  script:
+    - release.sh -ocelzLWH
