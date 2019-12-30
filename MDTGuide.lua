@@ -39,7 +39,7 @@ function Addon.ZoomBy(by)
     local map = main.mapPanelFrame
 
     local scale = z * map:GetScale()
-    local n = (z - 1) / (2 * scale)
+    local n = (z-1)/2 / scale
     local scrollX = scroll:GetHorizontalScroll() + n * scroll:GetWidth()
     local scrollY = scroll:GetVerticalScroll() + n * scroll:GetHeight()
 
@@ -56,8 +56,8 @@ function Addon.ZoomTo(minX, maxY, maxX, minY)
     local diffX = maxX - minX
     local diffY = maxY - minY
     local scale = 0.9 * min(6, w / diffX, h / diffY)
-    local scrollX = minX + diffX/2 - w/2/scale
-    local scrollY = -maxY + diffY/2 -h/2/scale
+    local scrollX = minX + diffX/2 - w/2 / scale
+    local scrollY = -maxY + diffY/2 - h/2 / scale
 
     Addon.Zoom(scale, scrollX, scrollY)
 end
@@ -234,6 +234,18 @@ function Addon.HookMethodDungeonTools()
         if active and tonumber(pull) then
             Addon.ZoomToPull(pull)
         end
+    end)
+
+    -- Hook pull tooltip
+    hooksecurefunc(mdt, "ActivatePullTooltip", function ()
+        if not active then return end
+
+        local tooltip = mdt.pullTooltip
+        local y2, _, frame, pos, _, y1 = select(5, tooltip:GetPoint(2)), tooltip:GetPoint(1)
+        local w = frame:GetWidth() + tooltip:GetWidth()
+
+        tooltip:SetPoint("TOPRIGHT", frame, pos, w, y1)
+        tooltip:SetPoint("BOTTOMRIGHT", frame, pos, 250 + w, y2)
     end)
 end
 
