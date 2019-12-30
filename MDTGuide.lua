@@ -69,6 +69,7 @@ function Addon.ZoomToPull(n)
     local pull = mdt:GetCurrentPreset().value.pulls[n]
     local enemies = mdt.dungeonEnemies[db.currentDungeonIdx]
 
+    -- Get best sublevel
     local currSub, minDiff = mdt:GetCurrentSubLevel()
     for enemyId,clones in pairs(pull) do
         local enemy = enemies[enemyId]
@@ -83,10 +84,10 @@ function Addon.ZoomToPull(n)
         end
         if minDiff == 0 then break end
     end
-
     local bestSub = currSub + minDiff
-    local minX, minY, maxX, maxY
 
+    -- Get rect to zoom to
+    local minX, minY, maxX, maxY
     for enemyId,clones in pairs(pull) do
         local enemy = enemies[enemyId]
         if enemy then
@@ -101,10 +102,11 @@ function Addon.ZoomToPull(n)
         end
     end
 
+    -- Change sublevel (if required) and zoom to rect
     if bestSub and minX and maxY and maxX and minY then
         if bestSub ~= currSub then
             mdt:SetCurrentSubLevel(bestSub)
-            mdt:UpdateMap()
+            mdt:UpdateMap(true)
         end
         Addon.ZoomTo(minX, maxY, maxX, minY)
     end
@@ -113,7 +115,6 @@ end
 function Addon.EnableGuideMode()
     if active then return end
     active = true
-
 
     -- Hide frames
     for _,f in pairs(Addon.GetFrames()) do
@@ -127,7 +128,7 @@ function Addon.EnableGuideMode()
     -- Resize
     mdt:StartScaling()
     mdt:SetScale(HEIGHT / 555)
-    mdt:UpdateMap()
+    mdt:UpdateMap(true)
 
     -- Zoom
     if main.mapPanelFrame:GetScale() > 1 then
