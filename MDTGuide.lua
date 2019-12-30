@@ -23,7 +23,17 @@ function Addon.GetFrames()
     return frames
 end
 
-function Addon.Zoom(by)
+function Addon.Zoom(scale, scrollX, scrollY)
+    local scroll = main.scrollFrame
+    local map = main.mapPanelFrame
+
+    map:SetScale(scale)
+    scroll:SetHorizontalScroll(scrollX)
+    scroll:SetVerticalScroll(scrollY)
+    mdt:ZoomMap(0)
+end
+
+function Addon.ZoomBy(by)
     local z = math.pow(ZOOM, by or 1)
     local scroll = main.scrollFrame
     local map = main.mapPanelFrame
@@ -33,10 +43,71 @@ function Addon.Zoom(by)
     local scrollX = scroll:GetHorizontalScroll() + n * scroll:GetWidth()
     local scrollY = scroll:GetVerticalScroll() + n * scroll:GetHeight()
 
-    map:SetScale(scale)
-    scroll:SetHorizontalScroll(scrollX)
-    scroll:SetVerticalScroll(scrollY)
-    mdt:ZoomMap(0)
+    Addon.Zoom(scale, scrollX, scrollY)
+end
+
+function Addon.ZoomTo(minX, maxY, maxX, minY)
+    local s = mdt:GetScale()
+    local w = main:GetWidth()
+    local h = main:GetHeight()
+
+    minX, maxY, maxX, minY = s*minX, s*maxY, s*maxX, s*minY
+
+    local diffX = maxX - minX
+    local diffY = maxY - minY
+    local scale = 0.9 * min(6, w / diffX, h / diffY)
+    local scrollX = minX + diffX/2 - w/2/scale
+    local scrollY = -maxY + diffY/2 -h/2/scale
+
+    Addon.Zoom(scale, scrollX, scrollY)
+end
+
+function Addon.ZoomToPull(n)
+    n = n or mdt:GetCurrentPull()
+
+    local db = mdt:GetDB()
+    local pull = mdt:GetCurrentPreset().value.pulls[n]
+    local enemies = mdt.dungeonEnemies[db.currentDungeonIdx]
+
+    local currSub, minDiff = mdt:GetCurrentSubLevel()
+    for enemyId,clones in pairs(pull) do
+        local enemy = enemies[enemyId]
+        if enemy then
+            for _,i in pairs(clones) do
+                local diff = enemy.clones[i].sublevel - currSub
+                if not minDiff or abs(diff) < abs(minDiff) or abs(diff) == abs(minDiff) and diff < minDiff then
+                    minDiff = diff
+                end
+                if minDiff == 0 then break end
+            end
+        end
+        if minDiff == 0 then break end
+    end
+
+    local bestSub = currSub + minDiff
+    local minX, minY, maxX, maxY
+
+    for enemyId,clones in pairs(pull) do
+        local enemy = enemies[enemyId]
+        if enemy then
+            for _,cloneId in pairs(clones) do
+                local clone = enemy.clones[cloneId]
+                local sub, x, y = clone.sublevel, clone.x, clone.y
+                if mdt:IsCloneIncluded(enemyId, cloneId) and sub == bestSub then
+                    minX, minY = min(minX or x, x), min(minY or y, y)
+                    maxX, maxY = max(maxX or x, x), max(maxY or y, y)
+                end
+            end
+        end
+    end
+
+    if bestSub and minX and maxY and maxX and minY then
+        if bestSub ~= currSub then
+            mdt:SetCurrentSubLevel(bestSub)
+            mdt:UpdateMap()
+        end
+        Addon.ZoomTo(minX, maxY, maxX, minY)
+    end
 end
 
 function Addon.EnableGuideMode()
@@ -60,7 +131,7 @@ function Addon.EnableGuideMode()
 
     -- Zoom
     if main.mapPanelFrame:GetScale() > 1 then
-        Addon.Zoom()
+        Addon.ZoomBy(1)
     end
 
     -- Adjust top panel
@@ -104,7 +175,7 @@ function Addon.DisableGuideMode()
     f:SetPoint("BOTTOMLEFT", main.sidePanel, "BOTTOMLEFT", 0, 30)
 
     -- Reset size
-    Addon.Zoom(-1)
+    Addon.ZoomBy(-1)
     mdt:GetDB().nonFullscreenScale = 1
     mdt:Minimize()
 
@@ -156,6 +227,13 @@ function Addon.HookMethodDungeonTools()
             main.maximizeButton:SetPoint("RIGHT", main.closeButton, "LEFT", 10, 0)
         end
     end)
+
+    -- Hook pull selection
+    hooksecurefunc(mdt, "SetSelectionToPull", function (_, pull)
+        if active and tonumber(pull) then
+            Addon.ZoomToPull(pull)
+        end
+    end)
 end
 
 local Events = CreateFrame("Frame")
@@ -165,3 +243,6 @@ Events:SetScript("OnEvent", function (_, ev, ...)
     end
 end)
 Events:RegisterEvent("ADDON_LOADED")
+
+-- TODO:DEBUG
+MDTG = Addon
