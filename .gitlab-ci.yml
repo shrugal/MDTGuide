@@ -17,7 +17,7 @@ build:
       - .release/MDTGuide/
       - .release/*.zip
 
- curseforge:
+curseforge:
   only: *releases
   stage: deploy
   environment:
