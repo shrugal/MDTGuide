@@ -179,6 +179,8 @@ function Addon.ZoomToPull(n)
         end
         return minDiff == 0
     end)
+
+    if not minDiff then return end
     local bestSub = currSub + minDiff
 
     -- Get rect to zoom to
@@ -216,18 +218,26 @@ function Addon.IteratePull(pull, fn, ...)
     local db = mdt:GetDB()
     local enemies = mdt.dungeonEnemies[db.currentDungeonIdx]
 
-    local stop = false
     for enemyId,clones in pairs(pull) do
         local enemy = enemies[enemyId]
         if enemy then
             for _,cloneId in pairs(clones) do
                 if mdt:IsCloneIncluded(enemyId, cloneId) then
-                    stop = fn(enemy.clones[cloneId], enemy, cloneId, enemyId, ...) == false
-                    if stop then break end
+                    local a, b = fn(enemy.clones[cloneId], enemy, cloneId, enemyId, ...)
+                    if a then return a, b end
                 end
             end
         end
-        if stop then break end
+    end
+end
+
+function Addon.IteratePulls(fn, ...)
+    local mdt = Addon.GetMDT()
+    local pulls = mdt:GetCurrentPreset().value.pulls
+
+    for i,pull in ipairs(pulls) do
+        local a, b = Addon.IteratePull(pull, fn, pull, i)
+        if a then return a, b end
     end
 end
 
@@ -255,14 +265,28 @@ function Addon.GetEnemyForces()
 end
 
 function Addon.GetCurrentPull()
-    local mdt = Addon.GetMDT()
-    local pulls = mdt:GetCurrentPreset().value.pulls
     local ef = Addon.GetEnemyForces()
 
-    local fn = function (_, enemy) ef = ef - enemy.count end
-    for n,pull in ipairs(pulls) do
-        Addon.IteratePull(pull, fn)
-        if ef < 0 then return n end
+    return Addon.IteratePulls(function (_, enemy, _, _, pull, i)
+        ef = ef - enemy.count
+        if ef < 0 then
+            return i, pull
+        end
+    end)
+end
+
+function Addon.ColorDeadEnemies()
+    local mdt = Addon.GetMDT()
+    local n = Addon.GetCurrentPull() or 1
+
+    if n > 1 then
+        Addon.IteratePulls(function (_, _, cloneId, enemyId, _, i)
+            if i >= n then return true end
+
+            local blip = mdt:GetBlip(enemyId, cloneId)
+            blip.texture_SelectedHighlight:SetVertexColor(0.7, 0, 0, 0.7)
+            blip.texture_Portrait:SetVertexColor(0.7, 0, 0, 0.7)
+        end)
     end
 end
 
@@ -336,6 +360,11 @@ Events:SetScript("OnEvent", function (_, ev, ...)
 
                 tooltip:SetPoint("TOPRIGHT", frame, pos, w, y1)
                 tooltip:SetPoint("BOTTOMRIGHT", frame, pos, 250 + w, y2)
+            end)
+
+            -- Hook enemy blips
+            hooksecurefunc(mdt, "DungeonEnemies_UpdateSelected", function ()
+                if MDTGuideActive then Addon.ColorDeadEnemies() end
             end)
         end
     elseif ev == "SCENARIO_CRITERIA_UPDATE" then
