@@ -4,28 +4,34 @@ local WIDTH = 300
 local HEIGHT = 0.66 * WIDTH
 local ZOOM = 1.8
 
-local hooked, active, toggleButton
-local mdt, main, frames
+MDTGuideActive = false
 
-function Addon.GetFrames()
-    if not frames then
-        frames = {
-            main.bottomPanel,
-            main.sidePanel,
-            main.sidePanel.WidgetGroup,
-            main.toolbar.toggleButton,
-            main.maximizeButton,
-            main.closeButton,
-            main.HelpButton,
-            main.DungeonSelectionGroup
-        }
-    end
+local hooked, toggleButton, frames
+
+function Addon.GetMDT()
+    local mdt = MethodDungeonTools
+    local main = mdt.main_frame
+    return mdt, main
+end
+
+function Addon.GetFramesToHide()
+    local _, main = Addon.GetMDT()
+
+    frames = frames or {
+        main.bottomPanel,
+        main.sidePanel.WidgetGroup,
+        main.sidePanel.ProgressBar,
+        main.toolbar.toggleButton,
+        main.maximizeButton,
+        main.HelpButton,
+        main.DungeonSelectionGroup
+    }
     return frames
 end
 
 function Addon.Zoom(scale, scrollX, scrollY)
-    local scroll = main.scrollFrame
-    local map = main.mapPanelFrame
+    local mdt, main = Addon.GetMDT()
+    local scroll, map = main.scrollFrame, main.mapPanelFrame
 
     map:SetScale(scale)
     scroll:SetHorizontalScroll(scrollX)
@@ -33,10 +39,9 @@ function Addon.Zoom(scale, scrollX, scrollY)
     mdt:ZoomMap(0)
 end
 
-function Addon.ZoomBy(by)
-    local z = math.pow(ZOOM, by or 1)
-    local scroll = main.scrollFrame
-    local map = main.mapPanelFrame
+function Addon.ZoomBy(z)
+    local _, main = Addon.GetMDT()
+    local scroll, map = main.scrollFrame, main.mapPanelFrame
 
     local scale = z * map:GetScale()
     local n = (z-1)/2 / scale
@@ -47,6 +52,8 @@ function Addon.ZoomBy(by)
 end
 
 function Addon.ZoomTo(minX, maxY, maxX, minY)
+    local mdt, main = Addon.GetMDT()
+
     local s = mdt:GetScale()
     local w = main:GetWidth()
     local h = main:GetHeight()
@@ -63,6 +70,8 @@ function Addon.ZoomTo(minX, maxY, maxX, minY)
 end
 
 function Addon.ZoomToPull(n)
+    local mdt = Addon.GetMDT()
+
     n = n or mdt:GetCurrentPull()
 
     local db = mdt:GetDB()
@@ -113,11 +122,13 @@ function Addon.ZoomToPull(n)
 end
 
 function Addon.EnableGuideMode()
-    if active then return end
-    active = true
+    if MDTGuideActive then return end
+    MDTGuideActive = true
+
+    local mdt, main = Addon.GetMDT()
 
     -- Hide frames
-    for _,f in pairs(Addon.GetFrames()) do
+    for _,f in pairs(Addon.GetFramesToHide()) do
        (f.frame or f):Hide()
     end
 
@@ -132,7 +143,7 @@ function Addon.EnableGuideMode()
 
     -- Zoom
     if main.mapPanelFrame:GetScale() > 1 then
-        Addon.ZoomBy(1)
+        Addon.ZoomBy(ZOOM)
     end
 
     -- Adjust top panel
@@ -141,6 +152,14 @@ function Addon.EnableGuideMode()
     f:SetPoint("BOTTOMLEFT", main, "TOPLEFT")
     f:SetPoint("BOTTOMRIGHT", main, "TOPRIGHT", HEIGHT, 0)
     f:SetHeight(25)
+
+    -- Adjust side panel
+    f = main.sidePanel
+    f:SetWidth(HEIGHT)
+    f:SetPoint("TOPLEFT", main, "TOPRIGHT", 0, 25)
+    f:SetPoint("BOTTOMLEFT", main, "BOTTOMRIGHT")
+    main.closeButton:SetPoint("TOPRIGHT", f, "TOPRIGHT", 7, 4)
+    toggleButton:SetPoint("RIGHT", main.closeButton, "LEFT")
 
     -- Adjust enemy info
     f = main.sidePanel.PullButtonScrollGroup
@@ -153,10 +172,12 @@ function Addon.EnableGuideMode()
 end
 
 function Addon.DisableGuideMode()
-    if not active then return end
-    active = false
+    if not MDTGuideActive then return end
+    MDTGuideActive = false
 
-    for _,f in pairs(Addon.GetFrames()) do
+    local mdt, main = Addon.GetMDT()
+
+    for _,f in pairs(Addon.GetFramesToHide()) do
         (f.frame or f):Show()
     end
 
@@ -167,6 +188,14 @@ function Addon.DisableGuideMode()
     f:SetPoint("BOTTOMRIGHT", main, "TOPRIGHT")
     f:SetHeight(30)
 
+    -- Adjust side panel
+    f = main.sidePanel
+    f:SetWidth(251)
+    f:SetPoint("TOPLEFT", main, "TOPRIGHT", 0, 30)
+    f:SetPoint("BOTTOMLEFT", main, "BOTTOMRIGHT", 0, -30)
+    main.closeButton:SetPoint("TOPRIGHT", f, "TOPRIGHT")
+    toggleButton:SetPoint("RIGHT", main.maximizeButton, "LEFT", 10, 0)
+
     -- Reset enemy info
     f = main.sidePanel.PullButtonScrollGroup.frame
     f:ClearAllPoints()
@@ -176,7 +205,7 @@ function Addon.DisableGuideMode()
     f:SetPoint("BOTTOMLEFT", main.sidePanel, "BOTTOMLEFT", 0, 30)
 
     -- Reset size
-    Addon.ZoomBy(-1)
+    Addon.ZoomBy(1 / ZOOM)
     mdt:GetDB().nonFullscreenScale = 1
     mdt:Minimize()
 
@@ -184,75 +213,79 @@ function Addon.DisableGuideMode()
 end
 
 function Addon.ToggleGuideMode()
-    if active then
+    if MDTGuideActive then
         Addon.DisableGuideMode()
     else
         Addon.EnableGuideMode()
     end
 end
 
-function Addon.HookMethodDungeonTools()
-    if hooked then return end
-    hooked = true
-
-    mdt = MethodDungeonTools
-
-    -- Insert toggle button
-    hooksecurefunc(mdt, "ShowInterface", function ()
-        if toggleButton then return end
-
-        main = mdt.main_frame
-
-        toggleButton = CreateFrame("Button", nil, mdt.main_frame, "MaximizeMinimizeButtonFrameTemplate")
-        toggleButton:Maximize()
-        toggleButton:SetOnMaximizedCallback(Addon.DisableGuideMode)
-        toggleButton:SetOnMinimizedCallback(Addon.EnableGuideMode)
-        toggleButton:Show()
-
-        main.maximizeButton:SetPoint("RIGHT", main.closeButton, "LEFT", 10, 0)
-        toggleButton:SetPoint("RIGHT", main.maximizeButton, "LEFT", 10, 0)
-    end)
-
-    -- Hook maximize/minimize
-    hooksecurefunc(mdt, "Maximize", function ()
-        Addon.DisableGuideMode()
-        if toggleButton then
-            toggleButton:Hide()
-            main.maximizeButton:SetPoint("RIGHT", main.closeButton, "LEFT")
-        end
-    end)
-    hooksecurefunc(mdt, "Minimize", function ()
-        Addon.DisableGuideMode()
-        if toggleButton then
-            toggleButton:Show()
-            main.maximizeButton:SetPoint("RIGHT", main.closeButton, "LEFT", 10, 0)
-        end
-    end)
-
-    -- Hook pull selection
-    hooksecurefunc(mdt, "SetSelectionToPull", function (_, pull)
-        if active and tonumber(pull) then
-            Addon.ZoomToPull(pull)
-        end
-    end)
-
-    -- Hook pull tooltip
-    hooksecurefunc(mdt, "ActivatePullTooltip", function ()
-        if not active then return end
-
-        local tooltip = mdt.pullTooltip
-        local y2, _, frame, pos, _, y1 = select(5, tooltip:GetPoint(2)), tooltip:GetPoint(1)
-        local w = frame:GetWidth() + tooltip:GetWidth()
-
-        tooltip:SetPoint("TOPRIGHT", frame, pos, w, y1)
-        tooltip:SetPoint("BOTTOMRIGHT", frame, pos, 250 + w, y2)
-    end)
-end
-
 local Events = CreateFrame("Frame")
 Events:SetScript("OnEvent", function (_, ev, ...)
-    if ev == "ADDON_LOADED" and ... == "MethodDungeonTools" then
-        Addon.HookMethodDungeonTools()
+    if ev == "ADDON_LOADED" and ... == "MethodDungeonTools" and not hooked then
+        hooked = true
+
+        local mdt = MethodDungeonTools
+
+        -- Insert toggle button
+        hooksecurefunc(mdt, "ShowInterface", function ()
+            if not toggleButton then
+                local main = mdt.main_frame
+
+                toggleButton = CreateFrame("Button", nil, mdt.main_frame, "MaximizeMinimizeButtonFrameTemplate")
+                toggleButton[MDTGuideActive and "Minimize" or "Maximize"](toggleButton)
+                toggleButton:SetOnMaximizedCallback(Addon.DisableGuideMode)
+                toggleButton:SetOnMinimizedCallback(Addon.EnableGuideMode)
+                toggleButton:Show()
+
+                main.maximizeButton:SetPoint("RIGHT", main.closeButton, "LEFT", 10, 0)
+                toggleButton:SetPoint("RIGHT", main.maximizeButton, "LEFT", 10, 0)
+            end
+
+            if MDTGuideActive then
+                MDTGuideActive = false
+                Addon.EnableGuideMode()
+            end
+        end)
+
+        -- Hook maximize/minimize
+        hooksecurefunc(mdt, "Maximize", function ()
+            local main = mdt.main_frame
+
+            Addon.DisableGuideMode()
+            if toggleButton then
+                toggleButton:Hide()
+                main.maximizeButton:SetPoint("RIGHT", main.closeButton, "LEFT")
+            end
+        end)
+        hooksecurefunc(mdt, "Minimize", function ()
+            local main = mdt.main_frame
+
+            Addon.DisableGuideMode()
+            if toggleButton then
+                toggleButton:Show()
+                main.maximizeButton:SetPoint("RIGHT", main.closeButton, "LEFT", 10, 0)
+            end
+        end)
+
+        -- Hook pull selection
+        hooksecurefunc(mdt, "SetSelectionToPull", function (_, pull)
+            if MDTGuideActive and tonumber(pull) then
+                Addon.ZoomToPull(pull)
+            end
+        end)
+
+        -- Hook pull tooltip
+        hooksecurefunc(mdt, "ActivatePullTooltip", function ()
+            if not MDTGuideActive then return end
+
+            local tooltip = mdt.pullTooltip
+            local y2, _, frame, pos, _, y1 = select(5, tooltip:GetPoint(2)), tooltip:GetPoint(1)
+            local w = frame:GetWidth() + tooltip:GetWidth()
+
+            tooltip:SetPoint("TOPRIGHT", frame, pos, w, y1)
+            tooltip:SetPoint("BOTTOMRIGHT", frame, pos, 250 + w, y2)
+        end)
     end
 end)
 Events:RegisterEvent("ADDON_LOADED")

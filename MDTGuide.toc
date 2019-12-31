@@ -3,6 +3,7 @@
 ## Notes: Guide mode for Method Dungeon Tools.
 ## Notes-deDE: Guide-Modus für Method Dungeon Tools.
 ## Version: @project-version@
+## SavedVariables: MDTGuideActive
 
 MDTGuide.lua
 
