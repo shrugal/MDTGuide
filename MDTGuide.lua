@@ -8,7 +8,6 @@ local SIDE_WIDTH = 200
 local ZOOM = 1.8
 
 MDTGuideActive = false
-MDTGuideKilled = {}
 
 local hooked, toggleButton, frames
 
