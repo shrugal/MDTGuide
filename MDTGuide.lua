@@ -165,10 +165,6 @@ function Addon.EnableGuideMode(noZoom)
        (f.frame or f):Hide()
     end
 
-    if main.toolbar:IsShown() then
-        main.toolbar.toggleButton:GetScript("OnClick")()
-    end
-
     -- Resize
     mdt:StartScaling()
     mdt:SetScale(HEIGHT / 555)
@@ -200,6 +196,14 @@ function Addon.EnableGuideMode(noZoom)
     f.frame:SetPoint("TOPLEFT", main.scrollFrame, "TOPRIGHT")
     f.frame:SetPoint("BOTTOMLEFT", main.scrollFrame, "BOTTOMRIGHT")
     f.frame:SetWidth(SIDE_WIDTH)
+
+    -- Hide some special frames
+    if main.toolbar:IsShown() then
+        main.toolbar.toggleButton:GetScript("OnClick")()
+    end
+
+    mdt:ToggleFreeholdSelector()
+    mdt:ToggleBoralusSelector()
 
     return true
 end
