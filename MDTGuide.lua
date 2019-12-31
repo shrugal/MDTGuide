@@ -119,9 +119,7 @@ function Addon.ZoomToPull(n)
 
     n = n or mdt:GetCurrentPull()
 
-    local db = mdt:GetDB()
     local pull = mdt:GetCurrentPreset().value.pulls[n]
-    local enemies = mdt.dungeonEnemies[db.currentDungeonIdx]
 
     -- Get best sublevel
     local currSub, minDiff = mdt:GetCurrentSubLevel()
