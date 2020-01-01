@@ -256,10 +256,10 @@ function Addon.GetFramesToHide()
 end
 
 function Addon.GetEnemyForces()
-    local step = select(3, C_Scenario.GetStepInfo())
-    if not step or step == 0 then return end
+    local n = select(3, C_Scenario.GetStepInfo())
+    if not n or n == 0 then return end
 
-    local total, _, _, curr = select(5, C_Scenario.GetCriteriaInfo(step))
+    local total, _, _, curr = select(5, C_Scenario.GetCriteriaInfo(n))
     return tonumber((curr:gsub("%%", ""))), total
 end
 
@@ -269,7 +269,7 @@ function Addon.GetCurrentPull()
 
     return Addon.IteratePulls(function (_, enemy, _, _, pull, i)
         ef = ef - enemy.count
-        if ef < 0 then
+        if ef < 0 or enemy.isBoss and not C_EncounterJournal.IsEncounterComplete(enemy.encounterID) then
             return i, pull
         end
     end)
@@ -278,7 +278,7 @@ end
 function Addon.ColorEnemies()
     local mdt = Addon.GetMDT()
     local n = Addon.GetCurrentPull()
-    if not n or n <= 1 then return end
+    if not n or n == 0 then return end
 
     Addon.IteratePulls(function (_, _, cloneId, enemyId, _, i)
         local r, g, b
