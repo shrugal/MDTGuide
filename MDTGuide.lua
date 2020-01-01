@@ -257,14 +257,15 @@ end
 
 function Addon.GetEnemyForces()
     local step = select(3, C_Scenario.GetStepInfo())
-    if step then
-        local total, _, _, curr = select(5, C_Scenario.GetCriteriaInfo(step))
-        return tonumber((curr:gsub("%%", ""))), total
-    end
+    if not step or step == 0 then return end
+
+    local total, _, _, curr = select(5, C_Scenario.GetCriteriaInfo(step))
+    return tonumber((curr:gsub("%%", ""))), total
 end
 
 function Addon.GetCurrentPull()
     local ef = Addon.GetEnemyForces()
+    if not ef then return end
 
     return Addon.IteratePulls(function (_, enemy, _, _, pull, i)
         ef = ef - enemy.count
@@ -274,19 +275,25 @@ function Addon.GetCurrentPull()
     end)
 end
 
-function Addon.ColorDeadEnemies()
+function Addon.ColorEnemies()
     local mdt = Addon.GetMDT()
-    local n = Addon.GetCurrentPull() or 1
+    local n = Addon.GetCurrentPull()
+    if not n or n <= 1 then return end
 
-    if n > 1 then
-        Addon.IteratePulls(function (_, _, cloneId, enemyId, _, i)
-            if i >= n then return true end
+    Addon.IteratePulls(function (_, _, cloneId, enemyId, _, i)
+        local r, g, b
+        if i > n then
+            return true
+        elseif i == n then
+            r, g, b = 0.13, 1, 1
+        else
+            r, g, b = 0.55, 0.13, 0.13
+        end
 
-            local blip = mdt:GetBlip(enemyId, cloneId)
-            blip.texture_SelectedHighlight:SetVertexColor(0.7, 0, 0, 0.7)
-            blip.texture_Portrait:SetVertexColor(0.7, 0, 0, 0.7)
-        end)
-    end
+        local blip = mdt:GetBlip(enemyId, cloneId)
+        blip.texture_SelectedHighlight:SetVertexColor(r, g, b, 0.7)
+        blip.texture_Portrait:SetVertexColor(r, g, b, 1)
+    end)
 end
 
 -- ---------------------------------------
@@ -363,7 +370,7 @@ Events:SetScript("OnEvent", function (_, ev, ...)
 
             -- Hook enemy blips
             hooksecurefunc(mdt, "DungeonEnemies_UpdateSelected", function ()
-                if MDTGuideActive then Addon.ColorDeadEnemies() end
+                if MDTGuideActive then Addon.ColorEnemies() end
             end)
         end
     elseif ev == "SCENARIO_CRITERIA_UPDATE" then
