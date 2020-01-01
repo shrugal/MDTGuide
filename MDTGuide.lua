@@ -208,8 +208,7 @@ end
 
 function Addon.GetMDT()
     local mdt = MethodDungeonTools
-    local main = mdt.main_frame
-    return mdt, main
+    return mdt, mdt and mdt.main_frame
 end
 
 function Addon.IteratePull(pull, fn, ...)
@@ -217,12 +216,12 @@ function Addon.IteratePull(pull, fn, ...)
     local db = mdt:GetDB()
     local enemies = mdt.dungeonEnemies[db.currentDungeonIdx]
 
-    for enemyId,clones in pairs(pull) do
-        local enemy = enemies[enemyId]
+    for enemyID,clones in pairs(pull) do
+        local enemy = enemies[enemyID]
         if enemy then
-            for _,cloneId in pairs(clones) do
-                if mdt:IsCloneIncluded(enemyId, cloneId) then
-                    local a, b = fn(enemy.clones[cloneId], enemy, cloneId, enemyId, ...)
+            for _,cloneID in pairs(clones) do
+                if mdt:IsCloneIncluded(enemyID, cloneID) then
+                    local a, b = fn(enemy.clones[cloneID], enemy, cloneID, enemyID, ...)
                     if a then return a, b end
                 end
             end
@@ -263,13 +262,28 @@ function Addon.GetEnemyForces()
     return tonumber((curr:gsub("%%", ""))), total
 end
 
+function Addon.IsEncounterDefeated(encounterID)
+    -- The asset ID seems to be the only thing connecting scenario steps
+    -- and journal encounters, other than trying to match the name :/
+    local assetID = select(7, EJ_GetEncounterInfo(encounterID))
+    local n = select(3, C_Scenario.GetStepInfo())
+    if not assetID or not n or n == 0 then return end
+
+    for i=1,n-1 do
+        local isDead, _, _, _, stepAssetID = select(3, C_Scenario.GetCriteriaInfo(i))
+        if stepAssetID == assetID then
+            return isDead
+        end
+    end
+end
+
 function Addon.GetCurrentPull()
     local ef = Addon.GetEnemyForces()
     if not ef then return end
 
     return Addon.IteratePulls(function (_, enemy, _, _, pull, i)
         ef = ef - enemy.count
-        if ef < 0 or enemy.isBoss and not C_EncounterJournal.IsEncounterComplete(enemy.encounterID) then
+        if ef < 0 or enemy.isBoss and not Addon.IsEncounterDefeated(enemy.encounterID) then
             return i, pull
         end
     end)
@@ -280,7 +294,7 @@ function Addon.ColorEnemies()
     local n = Addon.GetCurrentPull()
     if not n or n == 0 then return end
 
-    Addon.IteratePulls(function (_, _, cloneId, enemyId, _, i)
+    Addon.IteratePulls(function (_, _, cloneID, enemyID, _, i)
         local r, g, b
         if i > n then
             return true
@@ -290,9 +304,11 @@ function Addon.ColorEnemies()
             r, g, b = 0.55, 0.13, 0.13
         end
 
-        local blip = mdt:GetBlip(enemyId, cloneId)
-        blip.texture_SelectedHighlight:SetVertexColor(r, g, b, 0.7)
-        blip.texture_Portrait:SetVertexColor(r, g, b, 1)
+        local blip = mdt:GetBlip(enemyID, cloneID)
+        if blip then
+            blip.texture_SelectedHighlight:SetVertexColor(r, g, b, 0.7)
+            blip.texture_Portrait:SetVertexColor(r, g, b, 1)
+        end
     end)
 end
 
@@ -375,7 +391,7 @@ Events:SetScript("OnEvent", function (_, ev, ...)
         end
     elseif ev == "SCENARIO_CRITERIA_UPDATE" then
         local mdt, main = Addon.GetMDT()
-        if MDTGuideActive and main:IsShown() then
+        if MDTGuideActive and main and main:IsShown() then
             local n = Addon.GetCurrentPull()
             if n then
                 mdt:SetSelectionToPull(n)
