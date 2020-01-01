@@ -155,7 +155,7 @@ function Addon.ZoomTo(minX, maxY, maxX, minY)
 
     local diffX = maxX - minX
     local diffY = maxY - minY
-    local scale = 0.9 * min(9, w / diffX, h / diffY)
+    local scale = 0.8 * min(9, w / diffX, h / diffY)
     local scrollX = minX + diffX/2 - w/2 / scale
     local scrollY = -maxY + diffY/2 - h/2 / scale
 
