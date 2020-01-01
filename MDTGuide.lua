@@ -1,4 +1,4 @@
-local _, Addon = ...
+local Name, Addon = ...
 
 -- TODO:DEBUG
 MDTG = Addon
@@ -9,7 +9,7 @@ local ZOOM = 1.8
 
 MDTGuideActive = false
 
-local hooked, toggleButton, frames
+local toggleButton, frames
 
 -- ---------------------------------------
 --              Toggle mode
@@ -296,8 +296,8 @@ end
 local Events = CreateFrame("Frame")
 Events:SetScript("OnEvent", function (_, ev, ...)
     if ev == "ADDON_LOADED" then
-        if ... == "MethodDungeonTools" and not hooked then
-            hooked = true
+        if ... == Name then
+            Events:UnregisterEvent("ADDON_LOADED")
 
             local mdt = MethodDungeonTools
 
