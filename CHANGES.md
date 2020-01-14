@@ -1,3 +1,1 @@
-- Added coloring current pull cyan
-- Properly handle bosses
-- Bugfixes and refinements
+- Updated TOC version for 8.3

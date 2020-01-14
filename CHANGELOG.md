@@ -1,3 +1,8 @@
+Version 1-beta2
+- Added coloring current pull cyan
+- Properly handle bosses
+- Bugfixes and refinements
+
 Version 1-beta1
 - Initial release
 - Added compact view for MDT
