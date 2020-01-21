@@ -203,6 +203,132 @@ function Addon.ZoomToPull(n)
 end
 
 -- ---------------------------------------
+--             Path estimation
+-- ---------------------------------------
+
+function Addon.GetCurrentPull()
+    return Addon.GetCurrentPullByEnemyForces()
+end
+
+-- By enemy forces
+function Addon.GetCurrentPullByEnemyForces()
+    local ef = Addon.GetEnemyForces()
+    if not ef then return end
+
+    return Addon.IteratePulls(function (_, enemy, _, _, pull, i)
+        ef = ef - enemy.count
+        if ef < 0 or enemy.isBoss and not Addon.IsEncounterDefeated(enemy.encounterID) then
+            return i, pull
+        end
+    end)
+end
+
+-- By kills
+local BRANCH_FACTOR = 0
+local kills, queue, weights = {}, {}, {}
+
+local function Node(enemyId, cloneId)
+    return "e" .. enemyId .. "c" .. cloneId
+end
+
+local function Distance(a, b)
+    return math.sqrt(math.pow(a.x - b.x, 2) + math.pow(a.y - b.y, 2))
+end
+
+local function Path(path, node)
+    return path .. "-" .. node .. "-"
+end
+
+local function Contains(path, node)
+    return path:find("%-" .. node .. "%-") ~= nil
+end
+
+local function Last(enemies, path)
+    local enemyId, cloneId = path:match("-e(%d+)c(%d+)-$")
+    return enemyId and cloneId and enemies[enemyId].clones[cloneId]
+end
+
+local function Length(path)
+    return path:gsub("e%d+c%d+", ""):len() / 2
+end
+
+local function Weight(path, weight, length, dist)
+    if weight and length and dist then
+        weights[path] = (weight * length + dist * (1 + BRANCH_FACTOR * length)) / (length + 1)
+    end
+    return weights[path]
+end
+
+local function Insert(path, weight)
+    local l, r = 1, #queue+1
+
+    while r > l do
+        local m = math.floor(l + (r - l) / 2)
+        local w = Weight(queue[m])
+        if weight < w then
+            r = m
+        else
+            l = m+1
+        end
+    end
+
+    table.insert(queue, l, path)
+end
+
+function Addon.GetCurrentPullByKills()
+    local mdt = Addon.GetMDT()
+    local dungeon = mdt:GetCurrentPreset().value.currentDungeonIdx
+    local enemies = mdt.dungeonEnemies[dungeon]
+    local n, t = 0, GetTime()
+
+    local start
+    for _,poi in ipairs(mdt.mapPOIs[dungeon][1]) do
+        if poi.type == "graveyard" then
+            start = poi break
+        end
+    end
+
+    queue[1] = ""
+    weights[""] = 0
+
+    while true do
+        local path = table.remove(queue, 1)
+
+        -- Failure
+        if not path then
+            print("No valid path")
+            break
+        elseif GetTime() - t > 5 then
+            print("Too long!", n)
+            break
+        end
+
+        local weight, length, last = Weight(path), Length(path), Last(enemies, path) or start
+        local enemyId = kills[length+1]
+
+        -- Success
+        if length == #kills then
+            print(path, GetTime() - t, n)
+            break
+        end
+
+        -- Next step
+        for cloneId,clone in ipairs(enemies[enemyId].clones) do
+            local node = Node(enemyId, cloneId)
+            if not Contains(path, node) then
+                local p = Path(path, node)
+                Insert(p, Weight(p, weight, length, Distance(last, clone)))
+            end
+        end
+
+        n = n + 1
+    end
+
+    wipe(queue)
+    wipe(weights)
+end
+
+-- ---------------------------------------
 --                 Util
 -- ---------------------------------------
 
@@ -275,18 +401,6 @@ function Addon.IsEncounterDefeated(encounterID)
             return isDead
         end
     end
-end
-
-function Addon.GetCurrentPull()
-    local ef = Addon.GetEnemyForces()
-    if not ef then return end
-
-    return Addon.IteratePulls(function (_, enemy, _, _, pull, i)
-        ef = ef - enemy.count
-        if ef < 0 or enemy.isBoss and not Addon.IsEncounterDefeated(enemy.encounterID) then
-            return i, pull
-        end
-    end)
 end
 
 function Addon.ColorEnemies()
