@@ -6,10 +6,13 @@ MDTG = Addon
 local HEIGHT = 200
 local SIDE_WIDTH = 200
 local ZOOM = 1.8
+local BRANCH_FACTOR = 0
 
 MDTGuideActive = false
 
 local toggleButton, frames
+local currentDungeon
+local hits, kills, queue, weights = {}, {}, {}, {}
 
 -- ---------------------------------------
 --              Toggle mode
@@ -224,8 +227,6 @@ function Addon.GetCurrentPullByEnemyForces()
 end
 
 -- By kills
-local BRANCH_FACTOR = 0
-local kills, queue, weights = {}, {}, {}
 
 local function Node(enemyId, cloneId)
     return "e" .. enemyId .. "c" .. cloneId
@@ -277,14 +278,15 @@ end
 
 function Addon.GetCurrentPullByKills()
     local mdt = Addon.GetMDT()
-    local dungeon = mdt:GetCurrentPreset().value.currentDungeonIdx
+    local dungeon = mdt:GetDB().currentDungeonIdx
     local enemies = mdt.dungeonEnemies[dungeon]
     local n, t = 0, GetTime()
 
     local start
     for _,poi in ipairs(mdt.mapPOIs[dungeon][1]) do
         if poi.type == "graveyard" then
-            start = poi break
+            start = poi
+            break
         end
     end
 
@@ -326,6 +328,12 @@ function Addon.GetCurrentPullByKills()
 
     wipe(queue)
     wipe(weights)
+end
+
+function Addon.ResetDungeon(dungeon)
+    currentDungeon = dungeon
+    wipe(hits)
+    wipe(kills)
 end
 
 -- ---------------------------------------
@@ -426,6 +434,14 @@ function Addon.ColorEnemies()
     end)
 end
 
+function Addon.IsNPC(guid)
+    return guid and guid:sub(1, 8) == "Creature"
+end
+
+function Addon.GetNPCId(guid)
+    return tonumber(select(6, ("-"):split(guid)), 10)
+end
+
 -- ---------------------------------------
 --             Events, Hooks
 -- ---------------------------------------
@@ -503,6 +519,20 @@ Events:SetScript("OnEvent", function (_, ev, ...)
                 if MDTGuideActive then Addon.ColorEnemies() end
             end)
         end
+    elseif ev == "PLAYER_ENTERING_WORLD" then
+        local _, instanceType = IsInInstance()
+        if instanceType == "party" then
+            Events:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+            local dungeon = EJ_GetInstanceForMap(C_Map.GetBestMapForUnit("player"))
+            if dungeon ~= currentDungeon then
+                Addon.ResetDungeon(dungeon)
+            end
+        else
+            Events:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+            if instanceType then
+                Addon.ResetDungeon()
+            end
+        end
     elseif ev == "SCENARIO_CRITERIA_UPDATE" then
         local mdt, main = Addon.GetMDT()
         if MDTGuideActive and main and main:IsShown() then
@@ -511,7 +541,33 @@ Events:SetScript("OnEvent", function (_, ev, ...)
                 mdt:SetSelectionToPull(n)
             end
         end
+    elseif ev == "SCENARIO_COMPLETED" then
+        Events:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+        Addon.ResetDungeon()
+    elseif ev == "COMBAT_LOG_EVENT_UNFILTERED" then
+        local _, event, _, _, _, sourceFlags, _, destGUID, _, destFlags = CombatLogGetCurrentEventInfo()
+
+        if event == "UNIT_DIED" then
+            if hits[destGUID] then
+                hits[destGUID] = nil
+                local npcId = Addon.GetNPCId(destGUID)
+                for i,enemy in pairs(Addon.GetMDT().dungeonEnemies[currentDungeon]) do
+                    if enemy.id == npcId then
+                        table.insert(kills, i)
+                        break
+                    end
+                end
+            end
+        elseif event:match("DAMAGE") or event:match("AURA_APPLIED") then
+            local sourceIsParty = bit.band(sourceFlags, COMBATLOG_OBJECT_AFFILIATION_PARTY)
+            local destIsEnemy = bit.band(destFlags, COMBATLOG_OBJECT_AFFILIATION_OUTSIDER) and not bit.band(destFlags, COMBATLOG_OBJECT_REACTION_FRIENDLY)
+            if sourceIsParty and destIsEnemy and not hits[destGUID] then
+                hits[destGUID] = true
+            end
+        end
     end
 end)
 Events:RegisterEvent("ADDON_LOADED")
+Events:RegisterEvent("PLAYER_ENTERING_WORLD")
 Events:RegisterEvent("SCENARIO_CRITERIA_UPDATE")
+Events:RegisterEvent("SCENARIO_COMPLETED")
