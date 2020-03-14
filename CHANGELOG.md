@@ -1,3 +1,6 @@
+Version 1-beta3
+- Updated TOC version for 8.3
+
 Version 1-beta2
 - Added coloring current pull cyan
 - Properly handle bosses
