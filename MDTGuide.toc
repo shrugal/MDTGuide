@@ -4,7 +4,7 @@
 ## Notes-deDE: Guide-Modus für Method Dungeon Tools.
 ## Version: @project-version@
 ## Dependencies: MethodDungeonTools
-## SavedVariables: MDTGuideActive
+## SavedVariables: MDTGuideActive, MDTGuideRoute
 
 MDTGuide.lua
 

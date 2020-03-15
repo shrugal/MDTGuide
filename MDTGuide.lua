@@ -2,6 +2,7 @@ local Name, Addon = ...
 
 MDTG = Addon
 MDTGuideActive = false
+MDTGuideRoute = ""
 
 local HEIGHT = 200
 local WIDTH_SIDE = 200
@@ -11,18 +12,23 @@ local COLOR_CURR = {0.13, 1, 1}
 local COLOR_DEAD = {0.55, 0.13, 0.13}
 
 local BFS = true
-local BFS_WEIGHT_BRANCH = 0
-local BFS_WEIGHT_GROUP = 0.1
+local BFS_BRANCH = 2
+local BFS_WEIGHT_PULL = 0.1
+local BFS_WEIGHT_FORWARD = 0.3
 local BFS_WEIGHT_ROUTE = 0.5
+local BFS_WEIGHT_GROUP = 0.7
 local BFS_MAX_FRAME = 20
+local BFS_MAX_FRAME_SCALE = 0.5
 local BFS_MAX_TOTAL = 5
-local BFS_MAX_QUEUE = 1000
+local BFS_MAX_QUEUE = 2000
+
+local PATTERN_INSTANCE_RESET = "^" .. INSTANCE_RESET_SUCCESS:gsub("%%s", ".+") .. "$"
 
 local toggleButton, frames
 local currentDungeon
 local hits, kills, queue, weights, pulls = {}, {}, {}, {}, {}
-local route = ""
-local co, rerun, zoom
+local co, rerun, zoom, retry
+local bfs = true
 
 -- ---------------------------------------
 --              Toggle mode
@@ -79,8 +85,14 @@ function Addon.EnableGuideMode(noZoom)
     mdt:ToggleFreeholdSelector()
     mdt:ToggleBoralusSelector()
 
+    -- Adjust enemy info frame
     if mdt.EnemyInfoFrame and mdt.EnemyInfoFrame:IsShown() then
         Addon.AdjustEnemyInfo(mdt)
+    end
+
+    -- Prevent closing with esc
+    for i,v in pairs(UISpecialFrames) do
+        if v == "MethodDungeonToolsFrame" then tremove(UISpecialFrames, i) break end
     end
 
     return true
@@ -124,8 +136,18 @@ function Addon.DisableGuideMode()
     mdt:GetDB().nonFullscreenScale = 1
     mdt:Minimize()
 
+    -- Adjust enemy info frame
     if mdt.EnemyInfoFrame and mdt.EnemyInfoFrame:IsShown() then
         Addon.AdjustEnemyInfo(mdt)
+    end
+
+    -- Allow closing with esc
+    local found
+    for _,v in pairs(UISpecialFrames) do
+        if v == "MethodDungeonToolsFrame" then found = true break end
+    end
+    if not found then
+        tinsert(UISpecialFrames, "MethodDungeonToolsFrame")
     end
 
      return true
@@ -141,25 +163,27 @@ end
 
 function Addon.AdjustEnemyInfo(mdt)
     local f = mdt.EnemyInfoFrame
-    if not MDTGuideActive then
-        f.frame:ClearAllPoints()
-        f.frame:SetAllPoints(MethodDungeonToolsScrollFrame)
-        f:EnableResize(false)
-        f.frame:SetMovable(false)
-        f.frame.StartMoving = function () end
-    elseif f:GetPoint(2) then
-        f:ClearAllPoints()
-        f:SetPoint("CENTER")
-        f.frame:SetMovable(true)
-        f.frame.StartMoving = UIParent.StartMoving
-        f:SetWidth(800)
-        f:SetHeight(550)
-    end
+    if f then
+        if not MDTGuideActive then
+            f.frame:ClearAllPoints()
+            f.frame:SetAllPoints(MethodDungeonToolsScrollFrame)
+            f:EnableResize(false)
+            f.frame:SetMovable(false)
+            f.frame.StartMoving = function () end
+        elseif f:GetPoint(2) then
+            f:ClearAllPoints()
+            f:SetPoint("CENTER")
+            f.frame:SetMovable(true)
+            f.frame.StartMoving = UIParent.StartMoving
+            f:SetWidth(800)
+            f:SetHeight(550)
+        end
 
-    mdt:UpdateEnemyInfoFrame()
-    f.enemyDataContainer.stealthCheckBox:SetWidth((f.enemyDataContainer.frame:GetWidth()/2)-40)
-    f.enemyDataContainer.stealthDetectCheckBox:SetWidth((f.enemyDataContainer.frame:GetWidth()/2))
-    f.spellScroll:SetWidth(f.spellScrollContainer.content:GetWidth() or 0)
+        mdt:UpdateEnemyInfoFrame()
+        f.enemyDataContainer.stealthCheckBox:SetWidth((f.enemyDataContainer.frame:GetWidth()/2)-40)
+        f.enemyDataContainer.stealthDetectCheckBox:SetWidth((f.enemyDataContainer.frame:GetWidth()/2))
+        f.spellScroll:SetWidth(f.spellScrollContainer.content:GetWidth() or 0)
+    end
 end
 
 -- ---------------------------------------
@@ -208,38 +232,70 @@ end
 
 function Addon.ZoomToPull(n)
     local mdt = Addon.GetMDT()
-    local pull = Addon.GetCurrentPulls()[n or mdt:GetCurrentPull()]
+    n = n or mdt:GetCurrentPull()
+    local pull = Addon.GetCurrentPulls()[n]
 
-    -- Get best sublevel
-    local currSub, minDiff = mdt:GetCurrentSubLevel()
-    Addon.IteratePull(pull, function (clone)
-        local diff = clone.sublevel - currSub
-        if not minDiff or abs(diff) < abs(minDiff) or abs(diff) == abs(minDiff) and diff < minDiff then
-            minDiff = diff
+    if pull then
+        -- Get best sublevel
+        local currSub, minDiff = mdt:GetCurrentSubLevel()
+        Addon.IteratePull(pull, function (clone)
+            local diff = clone.sublevel - currSub
+            if not minDiff or abs(diff) < abs(minDiff) or abs(diff) == abs(minDiff) and diff < minDiff then
+                minDiff = diff
+            end
+            return minDiff == 0
+        end)
+
+        if not minDiff then return end
+        local bestSub = currSub + minDiff
+
+        -- Get rect to zoom to
+        local minX, minY, maxX, maxY
+        Addon.IteratePull(pull, function (clone)
+            local sub, x, y = clone.sublevel, clone.x, clone.y
+            if sub == bestSub then
+                minX, minY = min(minX or x, x), min(minY or y, y)
+                maxX, maxY = max(maxX or x, x), max(maxY or y, y)
+            end
+        end)
+
+        -- Change sublevel (if required) and zoom to rect
+        if bestSub and minX and maxY and maxX and minY then
+            if bestSub ~= currSub then
+                mdt:SetCurrentSubLevel(bestSub)
+                mdt:UpdateMap(true)
+            end
+            Addon.ZoomTo(minX, maxY, maxX, minY)
         end
-        return minDiff == 0
-    end)
 
-    if not minDiff then return end
-    local bestSub = currSub + minDiff
+        -- Scroll pull list
+        Addon.ScrollToPull(n)
+    end
+end
 
-    -- Get rect to zoom to
-    local minX, minY, maxX, maxY
-    Addon.IteratePull(pull, function (clone)
-        local sub, x, y = clone.sublevel, clone.x, clone.y
-        if sub == bestSub then
-            minX, minY = min(minX or x, x), min(minY or y, y)
-            maxX, maxY = max(maxX or x, x), max(maxY or y, y)
-        end
-    end)
+function Addon.ScrollToPull(n, center)
+    local mdt, main = Addon.GetMDT()
+    local scroll = main.sidePanel.pullButtonsScrollFrame
+    local pull = main.sidePanel.newPullButtons[n]
 
-    -- Change sublevel (if required) and zoom to rect
-    if bestSub and minX and maxY and maxX and minY then
-        if bestSub ~= currSub then
-            mdt:SetCurrentSubLevel(bestSub)
-            mdt:UpdateMap(true)
-        end
-        Addon.ZoomTo(minX, maxY, maxX, minY)
+    local height = scroll.scrollframe:GetHeight()
+    local offset = (scroll.status or scroll.localstatus).offset
+    local top = - select(5, pull.frame:GetPoint(1))
+    local bottom = top + pull.frame:GetHeight()
+
+    local diff, scrollTo = scroll.content:GetHeight() - height
+
+    if center then
+        scrollTo = max(0, min(top + (bottom - top) / 2 - height / 2, diff))
+    elseif top < offset then
+        scrollTo = top
+    elseif bottom > offset + height then
+        scrollTo = bottom - height
+    end
+
+    if scrollTo then
+        scroll:SetScroll(scrollTo / diff * 1000)
+        scroll:FixScroll()
     end
 end
 
@@ -318,32 +374,40 @@ local function Length(path)
     return path:gsub("e%d+c%d+", ""):len() / 2
 end
 
-local function Weight(path, weight, length, prev, curr, node)
+local function Weight(path, weight, length, prev, curr, prevNode, currNode)
     if weight then
+        local prevPull, currPull = prevNode and pulls[prevNode], currNode and pulls[currNode]
         local dist = Distance(prev, curr)
             * (prev.g and curr.g and prev.g == curr.g and BFS_WEIGHT_GROUP or 1)
-            * (pulls[node] and BFS_WEIGHT_ROUTE or 1)
-            * (1 + BFS_WEIGHT_BRANCH * length)
+            * (currPull and (prevPull and (prevPull == currPull and BFS_WEIGHT_PULL or prevPull < currPull and BFS_WEIGHT_FORWARD) or BFS_WEIGHT_ROUTE) or 1)
         weights[path] = (weight * length + dist) / (length + 1)
     end
     return weights[path]
 end
 
-local function Insert(path, weight)
-    local l, r = 1, #queue+1
+local function Insert(path, weight, length)
+    local lft, rgt = 1, #queue+1
 
-    while r > l do
-        local m = math.floor(l + (r - l) / 2)
-        local w = Weight(queue[m])
-        if weight < w then
-            r = m
+    while rgt > lft do
+        local m = math.floor(lft + (rgt - lft) / 2)
+        local p = queue[m]
+        local w, l = Weight(p), Length(p)
+
+        if l ~= length and (length <= BFS_BRANCH or l <= BFS_BRANCH) then
+            if length < l then
+                rgt = m
+            else
+                lft = m+1
+            end
+        elseif weight < w then
+            rgt = m
         else
-            l = m+1
+            lft = m+1
         end
     end
 
-    if l <= BFS_MAX_QUEUE then
-        table.insert(queue, l, path)
+    if lft <= BFS_MAX_QUEUE then
+        table.insert(queue, lft, path)
     end
 end
 
@@ -351,7 +415,7 @@ function Addon.CalculateRoute()
     local mdt = Addon.GetMDT()
     local dungeon = Addon.GetCurrentDungeonId()
     local enemies = Addon.GetCurrentEnemies()
-    local t, n = GetTime(), 1
+    local t, i, n = GetTime(), 1, 1
 
     local start
     for _,poi in ipairs(mdt.mapPOIs[dungeon][1]) do
@@ -365,28 +429,25 @@ function Addon.CalculateRoute()
     weights[""] = 0
 
     while true do
-        local path = table.remove(queue, 1)
+        local total = GetTime() - t
 
-        -- Failure
-        if not path then
-            print("No valid path", GetTime() - t, n)
+        -- Limit runtime
+        if total >= BFS_MAX_TOTAL then
+            print("[MDT Guide] Route calculation took too long, switching to enemy forces mode!")
+            bfs, rerun = false, false
             break
+        elseif i > BFS_MAX_FRAME * (1 - total * BFS_MAX_FRAME_SCALE / BFS_MAX_TOTAL) then
+            i = 1
+            coroutine.yield()
         end
 
-        local weight, length, last = Weight(path), Length(path), Last(path, enemies) or start
+        local path = table.remove(queue, 1)
+        local weight, length, last, lastNode = Weight(path), Length(path), Last(path, enemies) or start, Last(path)
         local enemyId = kills[length+1]
 
         -- Success
         if length == #kills then
-            print("Success", path, GetTime() - t, n)
-            route = path
-
-            Addon.ColorEnemies()
-            if zoom then
-                zoom = rerun
-                Addon.ZoomToCurrentPull()
-            end
-
+            MDTGuideRoute = path
             break
         end
 
@@ -396,29 +457,30 @@ function Addon.CalculateRoute()
             node = Node(enemyId, cloneId)
             if not Contains(path, node) then
                 p = Path(path, node)
-                Insert(p, Weight(p, weight, length, last, clone, node))
+                Insert(p, Weight(p, weight, length, last, clone, lastNode, node), length + 1)
             end
         end
 
-        if not p then
-            wipe(queue)
+        -- Done with path or retry with next enemy
+        if p then
+            weights[path] = nil
+        else
+            table.remove(kills, length+1)
+            table.insert(queue, 1, path)
         end
 
-        -- Limit runtime
-        if GetTime() - t >= BFS_MAX_TOTAL then
-            print("Too long!", GetTime() - t, n)
-            -- TODO: Switch to EF temporarily
-            break
-        elseif n % BFS_MAX_FRAME == 0 then
-            coroutine.yield()
-        end
-
-        n = n + 1
+        i, n = i+1, n+1
     end
 
     wipe(queue)
     wipe(weights)
 
+    Addon.ColorEnemies()
+
+    if zoom then
+        zoom = rerun
+        Addon.ZoomToCurrentPull()
+    end
     if rerun then
         Addon.UpdateRoute()
     end
@@ -449,11 +511,12 @@ end
 function Addon.ClearKills()
     wipe(hits)
     wipe(kills)
-    route = ""
+    MDTGuideRoute = ""
+    bfs = true
 end
 
 function Addon.GetCurrentPullByRoute()
-    local path = route
+    local path = MDTGuideRoute
     while path and path:len() > 0 do
         local node = Last(path)
         local n = pulls[node]
@@ -474,7 +537,7 @@ end
 
 function Addon.GetCurrentPull()
     if Addon.IsCurrentInstance() then
-        if BFS then
+        if Addon.IsBFS() then
             return Addon.GetCurrentPullByRoute()
         else
             return Addon.GetCurrentPullByEnemyForces()
@@ -484,12 +547,13 @@ end
 
 function Addon.ZoomToCurrentPull(refresh)
     local mdt = Addon.GetMDT()
-    if BFS and refresh then
+    if Addon.IsBFS() and refresh then
         Addon.UpdateRoute(true)
-    else
+    elseif Addon.IsActive() then
         local n = Addon.GetCurrentPull()
         if n then
             mdt:SetSelectionToPull(n)
+            Addon.ScrollToPull(n, true)
         end
     end
 end
@@ -504,15 +568,15 @@ function Addon.ColorEnemy(enemyId, cloneId, color)
 end
 
 function Addon.ColorEnemies()
-    if MDTGuideActive and Addon.IsCurrentInstance() then
-        if BFS then
+    if Addon.IsActive() and Addon.IsCurrentInstance() then
+        if Addon.IsBFS() then
             local n = Addon.GetCurrentPullByRoute()
             if n and n > 0 then
                 Addon.IteratePull(n, function (_, _, cloneId, enemyId)
                     Addon.ColorEnemy(enemyId, cloneId, COLOR_CURR)
                 end)
             end
-            for enemyId, cloneId in route:gmatch("-e(%d+)c(%d+)-") do
+            for enemyId, cloneId in MDTGuideRoute:gmatch("-e(%d+)c(%d+)-") do
                 Addon.ColorEnemy(tonumber(enemyId), tonumber(cloneId), COLOR_DEAD)
             end
         else
@@ -537,6 +601,15 @@ end
 function Addon.GetMDT()
     local mdt = MethodDungeonTools
     return mdt, mdt and mdt.main_frame
+end
+
+function Addon.IsActive()
+    local _, main = Addon.GetMDT()
+    return MDTGuideActive and main and main:IsShown()
+end
+
+function Addon.IsBFS()
+    return BFS and bfs
 end
 
 function Addon.GetCurrentDungeonId()
@@ -634,25 +707,14 @@ end
 
 function Addon.SetInstanceDungeon(dungeon)
     currentDungeon = dungeon
-
-    wipe(hits)
-    wipe(kills)
-    route = ""
-
+    Addon.ClearKills()
     Addon.UpdateRoute()
 end
 
 local Frame = CreateFrame("Frame")
 
--- Resume route calculation
-Frame:SetScript("OnUpdate", function ()
-    if co and coroutine.status(co) == "suspended" then
-        coroutine.resume(co)
-    end
-end)
-
 -- Event listeners
-Frame:SetScript("OnEvent", function (_, ev, ...)
+local OnEvent = function (_, ev, ...)
     if ev == "ADDON_LOADED" then
         if ... == Name then
             Frame:UnregisterEvent("ADDON_LOADED")
@@ -707,21 +769,21 @@ Frame:SetScript("OnEvent", function (_, ev, ...)
 
             -- Hook pull selection
             hooksecurefunc(mdt, "SetSelectionToPull", function (_, pull)
-                if MDTGuideActive and tonumber(pull) then
+                if Addon.IsActive() and tonumber(pull) then
                     Addon.ZoomToPull(pull)
                 end
             end)
 
             -- Hook pull tooltip
             hooksecurefunc(mdt, "ActivatePullTooltip", function ()
-                if not MDTGuideActive then return end
+                if Addon.IsActive() then
+                    local tooltip = mdt.pullTooltip
+                    local y2, _, frame, pos, _, y1 = select(5, tooltip:GetPoint(2)), tooltip:GetPoint(1)
+                    local w = frame:GetWidth() + tooltip:GetWidth()
 
-                local tooltip = mdt.pullTooltip
-                local y2, _, frame, pos, _, y1 = select(5, tooltip:GetPoint(2)), tooltip:GetPoint(1)
-                local w = frame:GetWidth() + tooltip:GetWidth()
-
-                tooltip:SetPoint("TOPRIGHT", frame, pos, w, y1)
-                tooltip:SetPoint("BOTTOMRIGHT", frame, pos, 250 + w, y2)
+                    tooltip:SetPoint("TOPRIGHT", frame, pos, w, y1)
+                    tooltip:SetPoint("BOTTOMRIGHT", frame, pos, 250 + w, y2)
+                end
             end)
 
             -- Hook enemy blips
@@ -733,17 +795,21 @@ Frame:SetScript("OnEvent", function (_, ev, ...)
     elseif ev == "PLAYER_ENTERING_WORLD" then
         local _, instanceType = IsInInstance()
         if instanceType == "party" then
-            local instance = EJ_GetInstanceForMap(C_Map.GetBestMapForUnit("player"))
-            local dungeon = Addon.GetInstanceDungeonId(instance)
+            local map = C_Map.GetBestMapForUnit("player")
+            if map then
+                local dungeon = Addon.GetInstanceDungeonId(EJ_GetInstanceForMap(map))
 
-            if dungeon ~= currentDungeon then
-                Addon.SetInstanceDungeon(dungeon)
+                if dungeon ~= currentDungeon then
+                    Addon.SetInstanceDungeon(dungeon)
 
-                if dungeon then
-                    Frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-                else
-                    Frame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+                    if dungeon then
+                        Frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+                    else
+                        Frame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+                    end
                 end
+            else
+                retry = {ev, ...}
             end
         else
             if instanceType then
@@ -751,14 +817,11 @@ Frame:SetScript("OnEvent", function (_, ev, ...)
             end
             Frame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
         end
-    elseif ev == "SCENARIO_CRITERIA_UPDATE" then
-        local _, main = Addon.GetMDT()
-        if MDTGuideActive and main and main:IsShown() then
-            Addon.ZoomToCurrentPull(true)
-        end
-    elseif ev == "SCENARIO_COMPLETED" then
+    elseif ev == "SCENARIO_COMPLETED" or ev == "CHAT_MSG_SYSTEM" and (...):match(PATTERN_INSTANCE_RESET) then
         Addon.SetInstanceDungeon()
         Frame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+    elseif ev == "SCENARIO_CRITERIA_UPDATE" and not Addon.IsBFS() then
+        Addon.ZoomToCurrentPull(true)
     elseif ev == "COMBAT_LOG_EVENT_UNFILTERED" then
         local _, event, _, _, _, sourceFlags, _, destGUID, _, destFlags = CombatLogGetCurrentEventInfo()
 
@@ -766,24 +829,37 @@ Frame:SetScript("OnEvent", function (_, ev, ...)
             if hits[destGUID] then
                 hits[destGUID] = nil
                 local npcId = Addon.GetNPCId(destGUID)
-                for i,enemy in pairs(Addon.GetMDT().dungeonEnemies[currentDungeon]) do
-                    if enemy.id == npcId then
-                        table.insert(kills, i)
-                        Addon.ZoomToCurrentPull(true)
-                        break
-                    end
+                if Addon.AddKill(npcId) and Addon.IsBFS() then
+                    Addon.ZoomToCurrentPull(true)
                 end
             end
         elseif event:match("DAMAGE") or event:match("AURA_APPLIED") then
-            local sourceIsParty = bit.band(sourceFlags, COMBATLOG_OBJECT_AFFILIATION_PARTY)
-            local destIsEnemy = bit.band(destFlags, COMBATLOG_OBJECT_AFFILIATION_OUTSIDER) and not bit.band(destFlags, COMBATLOG_OBJECT_REACTION_FRIENDLY)
+            local sourceIsParty = bit.band(sourceFlags, COMBATLOG_OBJECT_AFFILIATION_OUTSIDER) == 0
+            local destIsEnemy = bit.band(destFlags, COMBATLOG_OBJECT_AFFILIATION_OUTSIDER) > 0 and bit.band(destFlags, COMBATLOG_OBJECT_REACTION_FRIENDLY) == 0
             if sourceIsParty and destIsEnemy and not hits[destGUID] then
                 hits[destGUID] = true
             end
         end
     end
-end)
+end
+
+-- Resume route calculation
+local OnUpdate = function ()
+    if co and coroutine.status(co) == "suspended" then
+        coroutine.resume(co)
+    end
+
+    if retry then
+        local args = retry
+        retry = nil
+        OnEvent(nil, unpack(args))
+    end
+end
+
+Frame:SetScript("OnEvent", OnEvent)
+Frame:SetScript("OnUpdate", OnUpdate)
 Frame:RegisterEvent("ADDON_LOADED")
 Frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 Frame:RegisterEvent("SCENARIO_CRITERIA_UPDATE")
 Frame:RegisterEvent("SCENARIO_COMPLETED")
+Frame:RegisterEvent("CHAT_MSG_SYSTEM")
