@@ -12,35 +12,46 @@ local COLOR_CURR = {0.13, 1, 1}
 local COLOR_DEAD = {0.55, 0.13, 0.13}
 
 -- Use route estimation
-local BFS = true
+Addon.BFS = true
 -- # of hops before limiting branching
-local BFS_BRANCH = 4
+Addon.BFS_BRANCH = 2
 -- # of hops to track back from previous result
-local BFS_TRACK_BACK = 20
+Addon.BFS_TRACK_BACK = 15
 -- Distance weight to same pull
-local BFS_WEIGHT_PULL = 0.1
+Addon.BFS_WEIGHT_PULL = 0.1
 -- Distance weight to a following pull
-local BFS_WEIGHT_FORWARD = 0.3
+Addon.BFS_WEIGHT_FORWARD = 0.3
 -- Distance weight to a previous pull
-local BFS_WEIGHT_ROUTE = 0.5
+Addon.BFS_WEIGHT_ROUTE = 0.5
 -- Distance weight to same group
-local BFS_WEIGHT_GROUP = 0.7
+Addon.BFS_WEIGHT_GROUP = 0.7
+-- Weight by path length
+Addon.BFS_WEIGHT_LENGTH = 0.99
 -- Max rounds per frame
-local BFS_MAX_FRAME = 20
+Addon.BFS_MAX_FRAME = 15
 -- Scale MAX_FRAME with elapsed time
-local BFS_MAX_FRAME_SCALE = 0.5
+Addon.BFS_MAX_FRAME_SCALE = 0.5
 -- Total time to spend on route estimation (in s)
-local BFS_MAX_TOTAL = 5
+Addon.BFS_MAX_TOTAL = 5
+-- Max queue index for new candidates paths
+Addon.BFS_QUEUE_INSERT = 300
 -- Max # of path candidates in the queue
-local BFS_MAX_QUEUE = 2000
+Addon.BFS_QUEUE_MAX = 1000
 
-local PATTERN_INSTANCE_RESET = "^" .. INSTANCE_RESET_SUCCESS:gsub("%%s", ".+") .. "$"
+Addon.PATTERN_INSTANCE_RESET = "^" .. INSTANCE_RESET_SUCCESS:gsub("%%s", ".+") .. "$"
+
+Addon.hits, Addon.kills = {}, {}
 
 local toggleButton, frames
 local currentDungeon
-local hits, kills, queue, weights, pulls = {}, {}, {}, {}, {}
+local queue, weights, pulls = {}, {}, {}
 local co, rerun, zoom, retry
 local bfs = true
+
+Addon.DEBUG = false
+local debug = function (...)
+    if Addon.DEBUG then print(...) end
+end
 
 -- ---------------------------------------
 --              Toggle mode
@@ -367,19 +378,6 @@ local function Distance(ax, ay, bx, by, from, to)
         local p = Addon.FindWhere(POIs[from], "type", "mapLink", "target", to)
         local t = p and Addon.FindWhere(POIs[to], "type", "mapLink", "connectionIndex", p.connectionIndex)
         return t and Distance(ax, ay, p.x, p.y) + Distance(t.x, t.y, bx, by) or math.huge
-
-        -- This is to slow...
-        -- local low, high = math.min(from, to), math.max(from, to)
-        -- local res = math.huge
-
-        -- for _,p in pairs(POIs[from]) do
-        --     if p.type == "mapLink" and (p.target == to or p.target > low and p.target < high) then
-        --         local t = Addon.FindWhere(POIs[p.target], "connectionIndex", p.connectionIndex)
-        --         res = math.min(res, Distance(ax, ay, p.x, p.y) + Distance(t.x, t.y, bx, by, p.target, to))
-        --     end
-        -- end
-
-        -- return res
     end
 end
 
@@ -420,11 +418,11 @@ local function Weight(path, weight, length, prev, curr, prevNode, currNode)
             -- Base distance
             Distance(prev.x, prev.y, curr.x, curr.y, prev.sublevel, curr.sublevel)
             -- Weighted by group
-            * (prev.g and curr.g and prev.g == curr.g and BFS_WEIGHT_GROUP or 1)
+            * (prev.g and curr.g and prev.g == curr.g and Addon.BFS_WEIGHT_GROUP or 1)
             -- Weighted by direction
-            * (currPull and (prevPull and (prevPull == currPull and BFS_WEIGHT_PULL or prevPull < currPull and BFS_WEIGHT_FORWARD) or BFS_WEIGHT_ROUTE) or 1)
+            * (currPull and (prevPull and (prevPull == currPull and Addon.BFS_WEIGHT_PULL or prevPull < currPull and Addon.BFS_WEIGHT_FORWARD) or Addon.BFS_WEIGHT_ROUTE) or 1)
 
-            weights[path] = (weight * length + dist) / (length + 1)
+            weights[path] = (weight * length * Addon.BFS_WEIGHT_LENGTH + dist) / (length + 1)
     end
     return weights[path]
 end
@@ -438,7 +436,7 @@ local function Insert(path, length, weight)
         local p = queue[m]
         local w, l = Weight(p), Length(p)
 
-        if l ~= length and (length <= BFS_BRANCH or l <= BFS_BRANCH) then
+        if l ~= length and (length <= Addon.BFS_BRANCH or l <= Addon.BFS_BRANCH) then
             if length < l then
                 rgt = m
             else
@@ -451,8 +449,11 @@ local function Insert(path, length, weight)
         end
     end
 
-    if lft <= BFS_MAX_QUEUE then
+    if lft <= Addon.BFS_QUEUE_INSERT then
         table.insert(queue, lft, path)
+        if queue[Addon.BFS_QUEUE_MAX+1] then
+            table.remove(queue)
+        end
     end
 end
 
@@ -463,7 +464,7 @@ function Addon.CalculateRoute()
     local t, i, n, g = GetTime(), 1, 1, {}
 
     -- Start route
-    local start = Sub(MDTGuideRoute, BFS_TRACK_BACK)
+    local start = Sub(MDTGuideRoute, Addon.BFS_TRACK_BACK)
     queue[1] = start
     weights[start] = 0
 
@@ -481,21 +482,27 @@ function Addon.CalculateRoute()
         local total = GetTime() - t
 
         -- Limit runtime
-        if total >= BFS_MAX_TOTAL then
+        if total >= Addon.BFS_MAX_TOTAL then
             print("|cff00bbbb[MDTGuide]|r Route calculation took too long, switching to enemy forces mode!")
             bfs, rerun = false, false
             break
-        elseif i > BFS_MAX_FRAME * (1 - total * BFS_MAX_FRAME_SCALE / BFS_MAX_TOTAL) then
+        elseif i > Addon.BFS_MAX_FRAME * (1 - total * Addon.BFS_MAX_FRAME_SCALE / Addon.BFS_MAX_TOTAL) then
             i = 1
             coroutine.yield()
         end
 
         local path = table.remove(queue, 1)
+        if not path then
+            debug("No path found!")
+            break
+        end
+
         local weight, length, last, lastNode = Weight(path), Length(path), Last(path, enemies) or start, Last(path)
-        local enemyId = kills[length+1]
+        local enemyId = Addon.kills[length+1]
 
         -- Success
-        if length == #kills then
+        if length == #Addon.kills then
+            debug(n)
             MDTGuideRoute = path
             break
         end
@@ -523,13 +530,17 @@ function Addon.CalculateRoute()
             for _,p in pairs(g) do Insert(p, length+1) end
             weights[path] = nil
         else
-            table.remove(kills, length+1)
+            table.remove(Addon.kills, length+1)
             table.insert(queue, 1, path)
         end
 
         i, n = i+1, n+1
         wipe(g)
     end
+
+    debug("N", n)
+    debug("Time", GetTime() - t)
+    debug("Queue", #queue)
 
     wipe(queue)
     wipe(weights)
@@ -561,15 +572,16 @@ end
 function Addon.AddKill(npcId)
     for i,enemy in ipairs(Addon.GetMDT().dungeonEnemies[currentDungeon]) do
         if enemy.id == npcId then
-            table.insert(kills, i)
+            debug("ADD")
+            table.insert(Addon.kills, i)
             return i
         end
     end
 end
 
 function Addon.ClearKills()
-    wipe(hits)
-    wipe(kills)
+    wipe(Addon.hits)
+    wipe(Addon.kills)
     MDTGuideRoute = ""
     bfs = true
 end
@@ -668,7 +680,7 @@ function Addon.IsActive()
 end
 
 function Addon.IsBFS()
-    return BFS and bfs
+    return Addon.BFS and bfs
 end
 
 function Addon.GetCurrentDungeonId()
@@ -869,8 +881,10 @@ local OnEvent = function (_, ev, ...)
                     Addon.SetInstanceDungeon(dungeon)
 
                     if dungeon then
+                        debug("REGISTER")
                         Frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
                     else
+                        debug("UNREGISTER")
                         Frame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
                     end
                 end
@@ -884,6 +898,7 @@ local OnEvent = function (_, ev, ...)
             Frame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
         end
     elseif ev == "SCENARIO_COMPLETED" or ev == "CHAT_MSG_SYSTEM" and (...):match(PATTERN_INSTANCE_RESET) then
+        debug("RESET")
         Addon.SetInstanceDungeon()
         Frame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
     elseif ev == "SCENARIO_CRITERIA_UPDATE" and not Addon.IsBFS() then
@@ -892,8 +907,9 @@ local OnEvent = function (_, ev, ...)
         local _, event, _, _, _, sourceFlags, _, destGUID, _, destFlags = CombatLogGetCurrentEventInfo()
 
         if event == "UNIT_DIED" then
-            if hits[destGUID] then
-                hits[destGUID] = nil
+            if Addon.hits[destGUID] then
+                debug("KILL")
+                Addon.hits[destGUID] = nil
                 local npcId = Addon.GetNPCId(destGUID)
                 if Addon.AddKill(npcId) and Addon.IsBFS() then
                     Addon.ZoomToCurrentPull(true)
@@ -902,8 +918,9 @@ local OnEvent = function (_, ev, ...)
         elseif event:match("DAMAGE") or event:match("AURA_APPLIED") then
             local sourceIsParty = bit.band(sourceFlags, COMBATLOG_OBJECT_AFFILIATION_OUTSIDER) == 0
             local destIsEnemy = bit.band(destFlags, COMBATLOG_OBJECT_AFFILIATION_OUTSIDER) > 0 and bit.band(destFlags, COMBATLOG_OBJECT_REACTION_FRIENDLY) == 0
-            if sourceIsParty and destIsEnemy and not hits[destGUID] then
-                hits[destGUID] = true
+            if sourceIsParty and destIsEnemy and not Addon.hits[destGUID] then
+                debug("HIT")
+                Addon.hits[destGUID] = true
             end
         end
     end
@@ -942,9 +959,9 @@ function SlashCmdList.MDTG(args)
     local cmd, arg1, arg2 = strsplit(' ', args)
 
     if cmd == "route" then
-        arg1 = arg1 or not BFS and "enable"
-        BFS = arg1 == "enable"
-        print("|cff00bbbb[MDTGuide]|r Route predition " .. (BFS and "enabled" or "disabled"))
+        arg1 = arg1 or not Addon.BFS and "enable"
+        Addon.BFS = arg1 == "enable"
+        print("|cff00bbbb[MDTGuide]|r Route predition " .. (Addon.BFS and "enabled" or "disabled"))
     else
         print("|cff00bbbb[MDTGuide]|r Usage:")
         print("|cffbbbbbb/mdtg route [enable/disable]|r: Enable/Disable/Toggle route estimation.")
