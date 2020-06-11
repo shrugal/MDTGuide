@@ -11,7 +11,7 @@ local ZOOM = 1.8
 local COLOR_CURR = {0.13, 1, 1}
 local COLOR_DEAD = {0.55, 0.13, 0.13}
 
--- Use route prediction
+-- Use route estimation
 local BFS = true
 -- # of hops before limiting branching
 local BFS_BRANCH = 4
@@ -29,7 +29,7 @@ local BFS_WEIGHT_GROUP = 0.7
 local BFS_MAX_FRAME = 20
 -- Scale MAX_FRAME with elapsed time
 local BFS_MAX_FRAME_SCALE = 0.5
--- Total time to spend on route prediction (in s)
+-- Total time to spend on route estimation (in s)
 local BFS_MAX_TOTAL = 5
 -- Max # of path candidates in the queue
 local BFS_MAX_QUEUE = 2000
@@ -482,7 +482,7 @@ function Addon.CalculateRoute()
 
         -- Limit runtime
         if total >= BFS_MAX_TOTAL then
-            print("[MDT Guide] Route calculation took too long, switching to enemy forces mode!")
+            print("|cff00bbbb[MDTGuide]|r Route calculation took too long, switching to enemy forces mode!")
             bfs, rerun = false, false
             break
         elseif i > BFS_MAX_FRAME * (1 - total * BFS_MAX_FRAME_SCALE / BFS_MAX_TOTAL) then
@@ -929,3 +929,25 @@ Frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 Frame:RegisterEvent("SCENARIO_CRITERIA_UPDATE")
 Frame:RegisterEvent("SCENARIO_COMPLETED")
 Frame:RegisterEvent("CHAT_MSG_SYSTEM")
+
+-- ---------------------------------------
+--                  CLI
+-- ---------------------------------------
+
+SLASH_MDTG1 = "/mdtg"
+SLASH_MDTG2 = "/methoddungeontoolsguide"
+SLASH_MDTG2 = "/mplusguide"
+
+function SlashCmdList.MDTG(args)
+    local cmd, arg1, arg2 = strsplit(' ', args)
+
+    if cmd == "route" then
+        arg1 = arg1 or not BFS and "enable"
+        BFS = arg1 == "enable"
+        print("|cff00bbbb[MDTGuide]|r Route predition " .. (BFS and "enabled" or "disabled"))
+    else
+        print("|cff00bbbb[MDTGuide]|r Usage:")
+        print("|cffbbbbbb/mdtg route [enable/disable]|r: Enable/Disable/Toggle route estimation.")
+        print("|cffbbbbbb/mdtg|r: Print this help message.")
+    end
+end

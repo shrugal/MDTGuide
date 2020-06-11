@@ -1,1 +1,3 @@
-- Updated TOC version for 8.3
+- Added route estimation based on shortest path through killed enemies
+- Added `/mdtg` chat command to toggle route estimation
+- Fixed enemy info frame in guide mode
