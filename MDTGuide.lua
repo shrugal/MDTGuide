@@ -11,15 +11,27 @@ local ZOOM = 1.8
 local COLOR_CURR = {0.13, 1, 1}
 local COLOR_DEAD = {0.55, 0.13, 0.13}
 
+-- Use route prediction
 local BFS = true
-local BFS_BRANCH = 2
+-- # of hops before limiting branching
+local BFS_BRANCH = 4
+-- # of hops to track back from previous result
+local BFS_TRACK_BACK = 20
+-- Distance weight to same pull
 local BFS_WEIGHT_PULL = 0.1
+-- Distance weight to a following pull
 local BFS_WEIGHT_FORWARD = 0.3
+-- Distance weight to a previous pull
 local BFS_WEIGHT_ROUTE = 0.5
+-- Distance weight to same group
 local BFS_WEIGHT_GROUP = 0.7
+-- Max rounds per frame
 local BFS_MAX_FRAME = 20
+-- Scale MAX_FRAME with elapsed time
 local BFS_MAX_FRAME_SCALE = 0.5
+-- Total time to spend on route prediction (in s)
 local BFS_MAX_TOTAL = 5
+-- Max # of path candidates in the queue
 local BFS_MAX_QUEUE = 2000
 
 local PATTERN_INSTANCE_RESET = "^" .. INSTANCE_RESET_SUCCESS:gsub("%%s", ".+") .. "$"
@@ -346,13 +358,40 @@ local function Node(enemyId, cloneId)
     return "e" .. enemyId .. "c" .. cloneId
 end
 
-local function Distance(a, b)
-    -- TODO: Different map levels
-    return math.sqrt(math.pow(a.x - b.x, 2) + math.pow(a.y - b.y, 2))
+local function Distance(ax, ay, bx, by, from, to)
+    from, to = from or 1, to or 1
+    if from == to then
+        return math.sqrt(math.pow(ax - bx, 2) + math.pow(ay - by, 2))
+    else
+        local POIs = Addon.GetMDT().mapPOIs[Addon.GetCurrentDungeonId()]
+        local p = Addon.FindWhere(POIs[from], "type", "mapLink", "target", to)
+        local t = p and Addon.FindWhere(POIs[to], "type", "mapLink", "connectionIndex", p.connectionIndex)
+        return t and Distance(ax, ay, p.x, p.y) + Distance(t.x, t.y, bx, by) or math.huge
+
+        -- This is to slow...
+        -- local low, high = math.min(from, to), math.max(from, to)
+        -- local res = math.huge
+
+        -- for _,p in pairs(POIs[from]) do
+        --     if p.type == "mapLink" and (p.target == to or p.target > low and p.target < high) then
+        --         local t = Addon.FindWhere(POIs[p.target], "connectionIndex", p.connectionIndex)
+        --         res = math.min(res, Distance(ax, ay, p.x, p.y) + Distance(t.x, t.y, bx, by, p.target, to))
+        --     end
+        -- end
+
+        -- return res
+    end
 end
 
 local function Path(path, node)
     return path .. "-" .. node .. "-"
+end
+
+local function Sub(path, n)
+    for _=1,n or 1 do
+       path = path:gsub("%-[^-]+-$", "")
+    end
+    return path
 end
 
 local function Contains(path, node)
@@ -377,15 +416,21 @@ end
 local function Weight(path, weight, length, prev, curr, prevNode, currNode)
     if weight then
         local prevPull, currPull = prevNode and pulls[prevNode], currNode and pulls[currNode]
-        local dist = Distance(prev, curr)
+        local dist =
+            -- Base distance
+            Distance(prev.x, prev.y, curr.x, curr.y, prev.sublevel, curr.sublevel)
+            -- Weighted by group
             * (prev.g and curr.g and prev.g == curr.g and BFS_WEIGHT_GROUP or 1)
+            -- Weighted by direction
             * (currPull and (prevPull and (prevPull == currPull and BFS_WEIGHT_PULL or prevPull < currPull and BFS_WEIGHT_FORWARD) or BFS_WEIGHT_ROUTE) or 1)
-        weights[path] = (weight * length + dist) / (length + 1)
+
+            weights[path] = (weight * length + dist) / (length + 1)
     end
     return weights[path]
 end
 
-local function Insert(path, weight, length)
+local function Insert(path, length, weight)
+    length, weight = length or Length(path), weight or Weight(path)
     local lft, rgt = 1, #queue+1
 
     while rgt > lft do
@@ -415,18 +460,22 @@ function Addon.CalculateRoute()
     local mdt = Addon.GetMDT()
     local dungeon = Addon.GetCurrentDungeonId()
     local enemies = Addon.GetCurrentEnemies()
-    local t, i, n = GetTime(), 1, 1
+    local t, i, n, g = GetTime(), 1, 1, {}
 
-    local start
-    for _,poi in ipairs(mdt.mapPOIs[dungeon][1]) do
-        if poi.type == "graveyard" then
-            start = poi
-            break
+    -- Start route
+    local start = Sub(MDTGuideRoute, BFS_TRACK_BACK)
+    queue[1] = start
+    weights[start] = 0
+
+    -- Start POI
+    if start == "" then
+        for _,poi in ipairs(mdt.mapPOIs[dungeon][1]) do
+            if poi.type == "graveyard" then
+                start = poi
+                break
+            end
         end
     end
-
-    queue[1] = ""
-    weights[""] = 0
 
     while true do
         local total = GetTime() - t
@@ -452,17 +501,26 @@ function Addon.CalculateRoute()
         end
 
         -- Next step
-        local node, p
+        local found
         for cloneId,clone in ipairs(enemies[enemyId].clones) do
-            node = Node(enemyId, cloneId)
+            local node = Node(enemyId, cloneId)
             if not Contains(path, node) then
-                p = Path(path, node)
-                Insert(p, Weight(p, weight, length, last, clone, lastNode, node), length + 1)
+                local p = Path(path, node)
+                local w = Weight(p, weight, length, last, clone, lastNode, node)
+                if w < math.huge then
+                    found = true
+                    if not clone.g then
+                        Insert(p, length+1, w)
+                    elseif not g[clone.g] or w < Weight(g[clone.g]) then
+                        g[clone.g] = p
+                    end
+                end
             end
         end
 
-        -- Done with path or retry with next enemy
-        if p then
+        -- Insert grouped and proceed or retry with next enemy
+        if found then
+            for _,p in pairs(g) do Insert(p, length+1) end
             weights[path] = nil
         else
             table.remove(kills, length+1)
@@ -470,6 +528,7 @@ function Addon.CalculateRoute()
         end
 
         i, n = i+1, n+1
+        wipe(g)
     end
 
     wipe(queue)
@@ -500,7 +559,7 @@ function Addon.UpdateRoute(z)
 end
 
 function Addon.AddKill(npcId)
-    for i,enemy in pairs(Addon.GetMDT().dungeonEnemies[currentDungeon]) do
+    for i,enemy in ipairs(Addon.GetMDT().dungeonEnemies[currentDungeon]) do
         if enemy.id == npcId then
             table.insert(kills, i)
             return i
@@ -692,6 +751,14 @@ function Addon.GetInstanceDungeonId(instance)
     end
 end
 
+function Addon.FindWhere(tbl, key1, val1, key2, val2)
+    for i,v in pairs(tbl) do
+        if v[key1] == val1 and (not key2 or v[key2] == val2) then
+            return v, i
+        end
+    end
+end
+
 -- ---------------------------------------
 --             Events, Hooks
 -- ---------------------------------------
@@ -701,7 +768,6 @@ function Addon.SetDungeon()
     Addon.IteratePulls(function (_, _, cloneId, enemyId, _, pullId)
         pulls[Node(enemyId, cloneId)] = pullId
     end)
-
     Addon.UpdateRoute()
 end
 
