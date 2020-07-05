@@ -1,3 +1,4 @@
-- Added route estimation based on shortest path through killed enemies
 - Added `/mdtg` chat command to toggle route estimation
+- Added experimental route estimation based on shortest path through killed enemies, toggle with `/mdtg route`
 - Fixed enemy info frame in guide mode
+- Fixed problems after MDT renaming
