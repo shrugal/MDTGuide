@@ -12,7 +12,7 @@ local COLOR_CURR = {0.13, 1, 1}
 local COLOR_DEAD = {0.55, 0.13, 0.13}
 
 -- Use route estimation
-Addon.BFS = true
+Addon.BFS = false
 -- # of hops before limiting branching
 Addon.BFS_BRANCH = 2
 -- # of hops to track back from previous result
@@ -26,7 +26,7 @@ Addon.BFS_WEIGHT_ROUTE = 0.5
 -- Distance weight to same group
 Addon.BFS_WEIGHT_GROUP = 0.7
 -- Weight by path length
-Addon.BFS_WEIGHT_LENGTH = 0.99
+Addon.BFS_WEIGHT_LENGTH = 0.95
 -- Max rounds per frame
 Addon.BFS_MAX_FRAME = 15
 -- Scale MAX_FRAME with elapsed time
@@ -61,7 +61,7 @@ function Addon.EnableGuideMode(noZoom)
     if MDTGuideActive then return end
     MDTGuideActive = true
 
-    local mdt, main = Addon.GetMDT()
+    local main = MDT.main_frame
 
     -- Hide frames
     for _,f in pairs(Addon.GetFramesToHide()) do
@@ -69,9 +69,9 @@ function Addon.EnableGuideMode(noZoom)
     end
 
     -- Resize
-    mdt:StartScaling()
-    mdt:SetScale(HEIGHT / 555)
-    mdt:UpdateMap(true)
+    MDT:StartScaling()
+    MDT:SetScale(HEIGHT / 555)
+    MDT:UpdateMap(true)
 
     -- Zoom
     if not noZoom and main.mapPanelFrame:GetScale() > 1 then
@@ -105,17 +105,17 @@ function Addon.EnableGuideMode(noZoom)
         main.toolbar.toggleButton:GetScript("OnClick")()
     end
 
-    mdt:ToggleFreeholdSelector()
-    mdt:ToggleBoralusSelector()
+    MDT:ToggleFreeholdSelector()
+    MDT:ToggleBoralusSelector()
 
     -- Adjust enemy info frame
-    if mdt.EnemyInfoFrame and mdt.EnemyInfoFrame:IsShown() then
-        Addon.AdjustEnemyInfo(mdt)
+    if MDT.EnemyInfoFrame and MDT.EnemyInfoFrame:IsShown() then
+        Addon.AdjustEnemyInfo()
     end
 
     -- Prevent closing with esc
     for i,v in pairs(UISpecialFrames) do
-        if v == "MethodDungeonToolsFrame" then tremove(UISpecialFrames, i) break end
+        if v == "MDTFrame" then tremove(UISpecialFrames, i) break end
     end
 
     return true
@@ -125,7 +125,7 @@ function Addon.DisableGuideMode()
     if not MDTGuideActive then return end
     MDTGuideActive = false
 
-    local mdt, main = Addon.GetMDT()
+    local main = MDT.main_frame
 
     for _,f in pairs(Addon.GetFramesToHide()) do
         (f.frame or f):Show()
@@ -156,21 +156,21 @@ function Addon.DisableGuideMode()
 
     -- Reset size
     Addon.ZoomBy(1 / ZOOM)
-    mdt:GetDB().nonFullscreenScale = 1
-    mdt:Minimize()
+    MDT:GetDB().nonFullscreenScale = 1
+    MDT:Minimize()
 
     -- Adjust enemy info frame
-    if mdt.EnemyInfoFrame and mdt.EnemyInfoFrame:IsShown() then
-        Addon.AdjustEnemyInfo(mdt)
+    if MDT.EnemyInfoFrame and MDT.EnemyInfoFrame:IsShown() then
+        Addon.AdjustEnemyInfo()
     end
 
     -- Allow closing with esc
     local found
     for _,v in pairs(UISpecialFrames) do
-        if v == "MethodDungeonToolsFrame" then found = true break end
+        if v == "MDTFrame" then found = true break end
     end
     if not found then
-        tinsert(UISpecialFrames, "MethodDungeonToolsFrame")
+        tinsert(UISpecialFrames, "MDTFrame")
     end
 
      return true
@@ -184,12 +184,12 @@ function Addon.ToggleGuideMode()
     end
 end
 
-function Addon.AdjustEnemyInfo(mdt)
-    local f = mdt.EnemyInfoFrame
+function Addon.AdjustEnemyInfo()
+    local f = MDT.EnemyInfoFrame
     if f then
         if not MDTGuideActive then
             f.frame:ClearAllPoints()
-            f.frame:SetAllPoints(MethodDungeonToolsScrollFrame)
+            f.frame:SetAllPoints(MDTScrollFrame)
             f:EnableResize(false)
             f.frame:SetMovable(false)
             f.frame.StartMoving = function () end
@@ -202,7 +202,7 @@ function Addon.AdjustEnemyInfo(mdt)
             f:SetHeight(550)
         end
 
-        mdt:UpdateEnemyInfoFrame()
+        MDT:UpdateEnemyInfoFrame()
         f.enemyDataContainer.stealthCheckBox:SetWidth((f.enemyDataContainer.frame:GetWidth()/2)-40)
         f.enemyDataContainer.stealthDetectCheckBox:SetWidth((f.enemyDataContainer.frame:GetWidth()/2))
         f.spellScroll:SetWidth(f.spellScrollContainer.content:GetWidth() or 0)
@@ -214,17 +214,17 @@ end
 -- ---------------------------------------
 
 function Addon.Zoom(scale, scrollX, scrollY)
-    local mdt, main = Addon.GetMDT()
+    local main = MDT.main_frame
     local scroll, map = main.scrollFrame, main.mapPanelFrame
 
     map:SetScale(scale)
     scroll:SetHorizontalScroll(scrollX)
     scroll:SetVerticalScroll(scrollY)
-    mdt:ZoomMap(0)
+    MDT:ZoomMap(0)
 end
 
 function Addon.ZoomBy(z)
-    local _, main = Addon.GetMDT()
+    local main = MDT.main_frame
     local scroll, map = main.scrollFrame, main.mapPanelFrame
 
     local scale = z * map:GetScale()
@@ -236,9 +236,9 @@ function Addon.ZoomBy(z)
 end
 
 function Addon.ZoomTo(minX, maxY, maxX, minY)
-    local mdt, main = Addon.GetMDT()
+    local main = MDT.main_frame
 
-    local s = mdt:GetScale()
+    local s = MDT:GetScale()
     local w = main:GetWidth()
     local h = main:GetHeight()
 
@@ -254,13 +254,12 @@ function Addon.ZoomTo(minX, maxY, maxX, minY)
 end
 
 function Addon.ZoomToPull(n)
-    local mdt = Addon.GetMDT()
-    n = n or mdt:GetCurrentPull()
+    n = n or MDT:GetCurrentPull()
     local pull = Addon.GetCurrentPulls()[n]
 
     if pull then
         -- Get best sublevel
-        local currSub, minDiff = mdt:GetCurrentSubLevel()
+        local currSub, minDiff = MDT:GetCurrentSubLevel()
         Addon.IteratePull(pull, function (clone)
             local diff = clone.sublevel - currSub
             if not minDiff or abs(diff) < abs(minDiff) or abs(diff) == abs(minDiff) and diff < minDiff then
@@ -285,8 +284,8 @@ function Addon.ZoomToPull(n)
         -- Change sublevel (if required) and zoom to rect
         if bestSub and minX and maxY and maxX and minY then
             if bestSub ~= currSub then
-                mdt:SetCurrentSubLevel(bestSub)
-                mdt:UpdateMap(true)
+                MDT:SetCurrentSubLevel(bestSub)
+                MDT:UpdateMap(true)
             end
             Addon.ZoomTo(minX, maxY, maxX, minY)
         end
@@ -297,7 +296,7 @@ function Addon.ZoomToPull(n)
 end
 
 function Addon.ScrollToPull(n, center)
-    local mdt, main = Addon.GetMDT()
+    local main = MDT.main_frame
     local scroll = main.sidePanel.pullButtonsScrollFrame
     local pull = main.sidePanel.newPullButtons[n]
 
@@ -374,7 +373,7 @@ local function Distance(ax, ay, bx, by, from, to)
     if from == to then
         return math.sqrt(math.pow(ax - bx, 2) + math.pow(ay - by, 2))
     else
-        local POIs = Addon.GetMDT().mapPOIs[Addon.GetCurrentDungeonId()]
+        local POIs = MDT.mapPOIs[Addon.GetCurrentDungeonId()]
         local p = Addon.FindWhere(POIs[from], "type", "mapLink", "target", to)
         local t = p and Addon.FindWhere(POIs[to], "type", "mapLink", "connectionIndex", p.connectionIndex)
         return t and Distance(ax, ay, p.x, p.y) + Distance(t.x, t.y, bx, by) or math.huge
@@ -458,7 +457,6 @@ local function Insert(path, length, weight)
 end
 
 function Addon.CalculateRoute()
-    local mdt = Addon.GetMDT()
     local dungeon = Addon.GetCurrentDungeonId()
     local enemies = Addon.GetCurrentEnemies()
     local t, i, n, g = GetTime(), 1, 1, {}
@@ -470,7 +468,7 @@ function Addon.CalculateRoute()
 
     -- Start POI
     if start == "" then
-        for _,poi in ipairs(mdt.mapPOIs[dungeon][1]) do
+        for _,poi in ipairs(MDT.mapPOIs[dungeon][1]) do
             if poi.type == "graveyard" then
                 start = poi
                 break
@@ -570,7 +568,7 @@ function Addon.UpdateRoute(z)
 end
 
 function Addon.AddKill(npcId)
-    for i,enemy in ipairs(Addon.GetMDT().dungeonEnemies[currentDungeon]) do
+    for i,enemy in ipairs(MDT.dungeonEnemies[currentDungeon]) do
         if enemy.id == npcId then
             debug("ADD")
             table.insert(Addon.kills, i)
@@ -617,13 +615,12 @@ function Addon.GetCurrentPull()
 end
 
 function Addon.ZoomToCurrentPull(refresh)
-    local mdt = Addon.GetMDT()
     if Addon.IsBFS() and refresh then
         Addon.UpdateRoute(true)
     elseif Addon.IsActive() then
         local n = Addon.GetCurrentPull()
         if n then
-            mdt:SetSelectionToPull(n)
+            MDT:SetSelectionToPull(n)
             Addon.ScrollToPull(n, true)
         end
     end
@@ -631,7 +628,7 @@ end
 
 function Addon.ColorEnemy(enemyId, cloneId, color)
     local r, g, b = unpack(color)
-    local blip = Addon.GetMDT():GetBlip(enemyId, cloneId)
+    local blip = MDT:GetBlip(enemyId, cloneId)
     if blip then
         blip.texture_SelectedHighlight:SetVertexColor(r, g, b, 0.7)
         blip.texture_Portrait:SetVertexColor(r, g, b, 1)
@@ -669,13 +666,8 @@ end
 --                 Util
 -- ---------------------------------------
 
-function Addon.GetMDT()
-    local mdt = MethodDungeonTools
-    return mdt, mdt and mdt.main_frame
-end
-
 function Addon.IsActive()
-    local _, main = Addon.GetMDT()
+    local main = MDT.main_frame
     return MDTGuideActive and main and main:IsShown()
 end
 
@@ -684,7 +676,7 @@ function Addon.IsBFS()
 end
 
 function Addon.GetCurrentDungeonId()
-    return Addon.GetMDT():GetDB().currentDungeonIdx
+    return MDT:GetDB().currentDungeonIdx
 end
 
 function Addon.IsCurrentInstance()
@@ -692,16 +684,14 @@ function Addon.IsCurrentInstance()
 end
 
 function Addon.GetCurrentEnemies()
-    local mdt = Addon.GetMDT()
-    return mdt.dungeonEnemies[Addon.GetCurrentDungeonId()]
+    return MDT.dungeonEnemies[Addon.GetCurrentDungeonId()]
 end
 
 function Addon.GetCurrentPulls()
-    return Addon.GetMDT():GetCurrentPreset().value.pulls
+    return MDT:GetCurrentPreset().value.pulls
 end
 
 function Addon.IteratePull(pull, fn, ...)
-    local mdt = Addon.GetMDT()
     local enemies = Addon.GetCurrentEnemies()
 
     if type(pull) == "number" then
@@ -712,7 +702,7 @@ function Addon.IteratePull(pull, fn, ...)
         local enemy = enemies[enemyId]
         if enemy then
             for _,cloneId in pairs(clones) do
-                if mdt:IsCloneIncluded(enemyId, cloneId) then
+                if MDT:IsCloneIncluded(enemyId, cloneId) then
                     local a, b = fn(enemy.clones[cloneId], enemy, cloneId, enemyId, pull, ...)
                     if a then return a, b end
                 end
@@ -729,7 +719,7 @@ function Addon.IteratePulls(fn, ...)
 end
 
 function Addon.GetFramesToHide()
-    local _, main = Addon.GetMDT()
+    local main = MDT.main_frame
 
     frames = frames or {
         main.bottomPanel,
@@ -753,7 +743,7 @@ end
 
 function Addon.GetInstanceDungeonId(instance)
     if instance then
-        for id,enemies in pairs(Addon.GetMDT().dungeonEnemies) do
+        for id,enemies in pairs(MDT.dungeonEnemies) do
             for _,enemy in pairs(enemies) do
                 if enemy.instanceID == instance then
                     return id
@@ -797,14 +787,12 @@ local OnEvent = function (_, ev, ...)
         if ... == Name then
             Frame:UnregisterEvent("ADDON_LOADED")
 
-            local mdt = MethodDungeonTools
-
             -- Insert toggle button
-            hooksecurefunc(mdt, "ShowInterface", function ()
+            hooksecurefunc(MDT, "ShowInterface", function ()
                 if not toggleButton then
-                    local main = mdt.main_frame
+                    local main = MDT.main_frame
 
-                    toggleButton = CreateFrame("Button", nil, mdt.main_frame, "MaximizeMinimizeButtonFrameTemplate")
+                    toggleButton = CreateFrame("Button", nil, MDT.main_frame, "MaximizeMinimizeButtonFrameTemplate")
                     toggleButton[MDTGuideActive and "Minimize" or "Maximize"](toggleButton)
                     toggleButton:SetOnMaximizedCallback(function () Addon.DisableGuideMode() end)
                     toggleButton:SetOnMinimizedCallback(function () Addon.EnableGuideMode() end)
@@ -821,8 +809,8 @@ local OnEvent = function (_, ev, ...)
             end)
 
             -- Hook maximize/minimize
-            hooksecurefunc(mdt, "Maximize", function ()
-                local main = mdt.main_frame
+            hooksecurefunc(MDT, "Maximize", function ()
+                local main = MDT.main_frame
 
                 Addon.DisableGuideMode()
                 if toggleButton then
@@ -830,8 +818,8 @@ local OnEvent = function (_, ev, ...)
                     main.maximizeButton:SetPoint("RIGHT", main.closeButton, "LEFT")
                 end
             end)
-            hooksecurefunc(mdt, "Minimize", function ()
-                local main = mdt.main_frame
+            hooksecurefunc(MDT, "Minimize", function ()
+                local main = MDT.main_frame
 
                 Addon.DisableGuideMode()
                 if toggleButton then
@@ -841,21 +829,21 @@ local OnEvent = function (_, ev, ...)
             end)
 
             -- Hook dungeon selection
-            hooksecurefunc(mdt, "UpdateToDungeon", function ()
+            hooksecurefunc(MDT, "UpdateToDungeon", function ()
                 Addon.SetDungeon()
             end)
 
             -- Hook pull selection
-            hooksecurefunc(mdt, "SetSelectionToPull", function (_, pull)
+            hooksecurefunc(MDT, "SetSelectionToPull", function (_, pull)
                 if Addon.IsActive() and tonumber(pull) then
                     Addon.ZoomToPull(pull)
                 end
             end)
 
             -- Hook pull tooltip
-            hooksecurefunc(mdt, "ActivatePullTooltip", function ()
+            hooksecurefunc(MDT, "ActivatePullTooltip", function ()
                 if Addon.IsActive() then
-                    local tooltip = mdt.pullTooltip
+                    local tooltip = MDT.pullTooltip
                     local y2, _, frame, pos, _, y1 = select(5, tooltip:GetPoint(2)), tooltip:GetPoint(1)
                     local w = frame:GetWidth() + tooltip:GetWidth()
 
@@ -865,10 +853,10 @@ local OnEvent = function (_, ev, ...)
             end)
 
             -- Hook enemy blips
-            hooksecurefunc(mdt, "DungeonEnemies_UpdateSelected", Addon.ColorEnemies)
+            hooksecurefunc(MDT, "DungeonEnemies_UpdateSelected", Addon.ColorEnemies)
 
             -- Hook enemy info frame
-            hooksecurefunc(mdt, "ShowEnemyInfoFrame", Addon.AdjustEnemyInfo)
+            hooksecurefunc(MDT, "ShowEnemyInfoFrame", Addon.AdjustEnemyInfo)
         end
     elseif ev == "PLAYER_ENTERING_WORLD" then
         local _, instanceType = IsInInstance()
@@ -897,7 +885,7 @@ local OnEvent = function (_, ev, ...)
             end
             Frame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
         end
-    elseif ev == "SCENARIO_COMPLETED" or ev == "CHAT_MSG_SYSTEM" and (...):match(PATTERN_INSTANCE_RESET) then
+    elseif ev == "SCENARIO_COMPLETED" or ev == "CHAT_MSG_SYSTEM" and (...):match(Addon.PATTERN_INSTANCE_RESET) then
         debug("RESET")
         Addon.SetInstanceDungeon()
         Frame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")

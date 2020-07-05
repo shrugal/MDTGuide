@@ -1,9 +1,9 @@
 ## Interface: 80300
 ## Title: MDTGuide
-## Notes: Guide mode for Method Dungeon Tools.
-## Notes-deDE: Guide-Modus für Method Dungeon Tools.
+## Notes: Guide mode for Mythic Dungeon Tools.
+## Notes-deDE: Guide-Modus für Mythic Dungeon Tools.
 ## Version: @project-version@
-## Dependencies: MethodDungeonTools
+## Dependencies: MythicDungeonTools
 ## SavedVariables: MDTGuideActive, MDTGuideRoute
 
 MDTGuide.lua
