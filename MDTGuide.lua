@@ -940,7 +940,7 @@ Frame:RegisterEvent("CHAT_MSG_SYSTEM")
 -- ---------------------------------------
 
 SLASH_MDTG1 = "/mdtg"
-SLASH_MDTG2 = "/methoddungeontoolsguide"
+SLASH_MDTG2 = "/mythicdungeontoolsguide"
 SLASH_MDTG2 = "/mplusguide"
 
 function SlashCmdList.MDTG(args)
