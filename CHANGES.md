@@ -1,1 +1,4 @@
-- Updated TOC version for patch 9.0.2
+- Made addon work with alternative MDT addons
+- Added "/mdtg height" command and restored resizer in guide mode to change window size
+- Fixed hull-line width and distance to enemy groups on the map
+- Added missing starting locations for route prediction in Shadowlands dungeons

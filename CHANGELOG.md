@@ -1,3 +1,6 @@
+Version 1.01
+- Updated TOC version for patch 9.0.2
+
 Version 1
 - Added `/mdtg` chat command to toggle route estimation
 - Added experimental route estimation based on shortest path through killed enemies, toggle with `/mdtg route`

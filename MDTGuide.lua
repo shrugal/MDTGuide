@@ -3,11 +3,17 @@ local Name, Addon = ...
 MDTG = Addon
 MDTGuideActive = false
 MDTGuideRoute = ""
+MDTGuideOptions = {
+    height = 200,
+    widthSide = 200,
+    zoom = 1.8,
+    zoomBorder = 20
+}
 
-local HEIGHT = 200
-local WIDTH_SIDE = 200
-local ZOOM = 1.8
-
+local WIDTH = 840
+local HEIGHT = 555
+local RATIO = WIDTH / HEIGHT
+local MIN_HEIGHT = 150
 local COLOR_CURR = {0.13, 1, 1}
 local COLOR_DEAD = {0.55, 0.13, 0.13}
 
@@ -15,7 +21,7 @@ local COLOR_DEAD = {0.55, 0.13, 0.13}
 Addon.BFS = false
 -- # of hops before limiting branching
 Addon.BFS_BRANCH = 2
--- # of hops to track back from previous result
+-- \# of hops to track back from previous result
 Addon.BFS_TRACK_BACK = 15
 -- Distance weight to same pull
 Addon.BFS_WEIGHT_PULL = 0.1
@@ -69,27 +75,32 @@ function Addon.EnableGuideMode(noZoom)
     end
 
     -- Resize
+    main:SetMinResize(MIN_HEIGHT * RATIO, MIN_HEIGHT)
     MDT:StartScaling()
-    MDT:SetScale(HEIGHT / 555)
+    MDT:SetScale(MDTGuideOptions.height / HEIGHT)
     MDT:UpdateMap(true)
+    MDT:DrawAllHulls()
 
     -- Zoom
     if not noZoom and main.mapPanelFrame:GetScale() > 1 then
-        Addon.ZoomBy(ZOOM)
+        Addon.ZoomBy(MDTGuideOptions.zoom)
     end
 
     -- Adjust top panel
     local f = main.topPanel
     f:ClearAllPoints()
     f:SetPoint("BOTTOMLEFT", main, "TOPLEFT")
-    f:SetPoint("BOTTOMRIGHT", main, "TOPRIGHT", WIDTH_SIDE, 0)
+    f:SetPoint("BOTTOMRIGHT", main, "TOPRIGHT", MDTGuideOptions.widthSide, 0)
     f:SetHeight(25)
+
+    -- Adjust bottom panel
+    main.bottomPanel:SetHeight(20)
 
     -- Adjust side panel
     f = main.sidePanel
-    f:SetWidth(WIDTH_SIDE)
+    f:SetWidth(MDTGuideOptions.widthSide)
     f:SetPoint("TOPLEFT", main, "TOPRIGHT", 0, 25)
-    f:SetPoint("BOTTOMLEFT", main, "BOTTOMRIGHT")
+    f:SetPoint("BOTTOMLEFT", main, "BOTTOMRIGHT", 0, -20)
     main.closeButton:SetPoint("TOPRIGHT", f, "TOPRIGHT", 7, 4)
     toggleButton:SetPoint("RIGHT", main.closeButton, "LEFT")
 
@@ -98,7 +109,7 @@ function Addon.EnableGuideMode(noZoom)
     f.frame:ClearAllPoints()
     f.frame:SetPoint("TOPLEFT", main.scrollFrame, "TOPRIGHT")
     f.frame:SetPoint("BOTTOMLEFT", main.scrollFrame, "BOTTOMRIGHT")
-    f.frame:SetWidth(WIDTH_SIDE)
+    f.frame:SetWidth(MDTGuideOptions.widthSide)
 
     -- Hide some special frames
     if main.toolbar:IsShown() then
@@ -138,7 +149,10 @@ function Addon.DisableGuideMode()
     f:SetPoint("BOTTOMRIGHT", main, "TOPRIGHT")
     f:SetHeight(30)
 
-    -- Adjust side panel
+    -- Reset bottom panel
+    main.bottomPanel:SetHeight(30)
+
+    -- Reset side panel
     f = main.sidePanel
     f:SetWidth(251)
     f:SetPoint("TOPLEFT", main, "TOPRIGHT", 0, 30)
@@ -155,11 +169,12 @@ function Addon.DisableGuideMode()
     f:SetPoint("BOTTOMLEFT", main.sidePanel, "BOTTOMLEFT", 0, 30)
 
     -- Reset size
-    Addon.ZoomBy(1 / ZOOM)
+    Addon.ZoomBy(1 / MDTGuideOptions.zoom)
     MDT:GetDB().nonFullscreenScale = 1
     MDT:Minimize()
+    main:SetMinResize(WIDTH * 0.75, HEIGHT * 0.75)
 
-    -- Adjust enemy info frame
+    -- Reset enemy info frame
     if MDT.EnemyInfoFrame and MDT.EnemyInfoFrame:IsShown() then
         Addon.AdjustEnemyInfo()
     end
@@ -181,6 +196,16 @@ function Addon.ToggleGuideMode()
         Addon.DisableGuideMode()
     else
         Addon.EnableGuideMode()
+    end
+end
+
+function Addon.ReloadGuideMode(fn)
+    if Addon.IsActive() then
+        Addon.ToggleGuideMode()
+        fn()
+        Addon.ToggleGuideMode()
+    else
+        fn()
     end
 end
 
@@ -237,6 +262,9 @@ end
 
 function Addon.ZoomTo(minX, maxY, maxX, minY)
     local main = MDT.main_frame
+
+    local b = MDTGuideOptions.zoomBorder
+    minX, maxY, maxX, minY = max(0, minX - b), min(0, maxY + b), maxX + b, minY - b
 
     local s = MDT:GetScale()
     local w = main:GetWidth()
@@ -468,11 +496,20 @@ function Addon.CalculateRoute()
 
     -- Start POI
     if start == "" then
-        for _,poi in ipairs(MDT.mapPOIs[dungeon][1]) do
-            if poi.type == "graveyard" then
-                start = poi
-                break
+        if Addon.dungeons[dungeon] and Addon.dungeons[dungeon].start then
+            start = Addon.dungeons[dungeon].start
+        else
+            for _,poi in ipairs(MDT.mapPOIs[dungeon][1]) do
+                if poi.type == "graveyard" then
+                    start = poi
+                    break
+                end
             end
+        end
+
+        if not start or start == "" then
+            debug("No starting point!")
+            return
         end
     end
 
@@ -500,7 +537,6 @@ function Addon.CalculateRoute()
 
         -- Success
         if length == #Addon.kills then
-            debug(n)
             MDTGuideRoute = path
             break
         end
@@ -570,7 +606,6 @@ end
 function Addon.AddKill(npcId)
     for i,enemy in ipairs(MDT.dungeonEnemies[currentDungeon]) do
         if enemy.id == npcId then
-            debug("ADD")
             table.insert(Addon.kills, i)
             return i
         end
@@ -722,7 +757,7 @@ function Addon.GetFramesToHide()
     local main = MDT.main_frame
 
     frames = frames or {
-        main.bottomPanel,
+        main.bottomPanelString,
         main.sidePanel.WidgetGroup,
         main.sidePanel.ProgressBar,
         main.toolbar.toggleButton,
@@ -783,12 +818,15 @@ local Frame = CreateFrame("Frame")
 
 -- Event listeners
 local OnEvent = function (_, ev, ...)
+    if not MDT or MDT:GetDB().devMode then return end
+
     if ev == "ADDON_LOADED" then
         if ... == Name then
             Frame:UnregisterEvent("ADDON_LOADED")
 
-            -- Insert toggle button
+            -- Hook showing interface
             hooksecurefunc(MDT, "ShowInterface", function ()
+                -- Insert toggle button
                 if not toggleButton then
                     local main = MDT.main_frame
 
@@ -857,6 +895,31 @@ local OnEvent = function (_, ev, ...)
 
             -- Hook enemy info frame
             hooksecurefunc(MDT, "ShowEnemyInfoFrame", Addon.AdjustEnemyInfo)
+
+            -- Hook menu creation
+            hooksecurefunc(MDT, "CreateMenu", function ()
+                local main = MDT.main_frame
+
+                -- Hook size change
+                main.resizer:HookScript("OnMouseUp", function ()
+                    if MDTGuideActive then
+                        MDTGuideOptions.height = main:GetHeight()
+                    end
+                end)
+            end)
+
+            -- Hook hull drawing
+            local origFn = MDT.DrawHull
+            MDT.DrawHull = function (...)
+                if MDTGuideActive then
+                    local scale = MDT:GetScale() or 1
+                    for i,v in pairs(MDT.scaleMultiplier) do MDT.scaleMultiplier[i] = v * scale end
+                    origFn(...)
+                    for i,v in pairs(MDT.scaleMultiplier) do MDT.scaleMultiplier[i] = v / scale end
+                else
+                    origFn(...)
+                end
+            end
         end
     elseif ev == "PLAYER_ENTERING_WORLD" then
         local _, instanceType = IsInInstance()
@@ -940,18 +1003,31 @@ Frame:RegisterEvent("CHAT_MSG_SYSTEM")
 -- ---------------------------------------
 
 SLASH_MDTG1 = "/mdtg"
-SLASH_MDTG2 = "/mythicdungeontoolsguide"
-SLASH_MDTG2 = "/mplusguide"
+
+local function echo (title, line, ...)
+    print("|cff00bbbb[MDTGuide]|r " .. (title and title ..": " or "") .. (line or ""), ...)
+end
 
 function SlashCmdList.MDTG(args)
-    local cmd, arg1, arg2 = strsplit(' ', args)
+    local cmd, arg1 = strsplit(' ', args)
 
-    if cmd == "route" then
+    if cmd == "height" then
+        arg1 = tonumber(arg1)
+        if not arg1 then
+            echo(cmd, "First parameter must be a number.")
+        else
+            Addon.ReloadGuideMode(function ()
+                MDTGuideOptions.height = tonumber(arg1)
+            end)
+            echo(cmd, "Height set to " .. arg1 .. ".")
+        end
+    elseif cmd == "route" then
         arg1 = arg1 or not Addon.BFS and "enable"
         Addon.BFS = arg1 == "enable"
-        print("|cff00bbbb[MDTGuide]|r Route predition " .. (Addon.BFS and "enabled" or "disabled"))
+        echo(cmd, "Route predition " .. (Addon.BFS and "enabled" or "disabled"))
     else
-        print("|cff00bbbb[MDTGuide]|r Usage:")
+        echo("Usage")
+        print("|cffbbbbbb/mdtg height [height]|r: Adjust the guide window size by setting the height, default is 200.")
         print("|cffbbbbbb/mdtg route [enable/disable]|r: Enable/Disable/Toggle route estimation.")
         print("|cffbbbbbb/mdtg|r: Print this help message.")
     end

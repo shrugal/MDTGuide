@@ -3,9 +3,10 @@
 ## Notes: Guide mode for Mythic Dungeon Tools.
 ## Notes-deDE: Guide-Modus für Mythic Dungeon Tools.
 ## Version: @project-version@
-## Dependencies: MythicDungeonTools
-## SavedVariables: MDTGuideActive, MDTGuideRoute
+## OptionalDeps: MythicDungeonTools, ManbabyDungeonTools, DungeonTools
+## SavedVariables: MDTGuideActive, MDTGuideRoute, MDTGuideOptions
 
+Data.lua
 MDTGuide.lua
 
 #@do-not-package@
