@@ -969,7 +969,7 @@ local OnEvent = function (_, ev, ...)
             MDT.DrawHull = function (...)
                 if MDTGuideActive then
                     local scale = MDT:GetScale() or 1
-                    for i,v in pairs(MDT.scaleMultiplier) do MDT.scaleMultiplier[i] = v * scale end
+                    for i=1,MDT:GetNumDungeons() do MDT.scaleMultiplier[i] = (MDT.scaleMultiplier[i] or 1) * scale end
                     origFn(...)
                     for i,v in pairs(MDT.scaleMultiplier) do MDT.scaleMultiplier[i] = v / scale end
                 else

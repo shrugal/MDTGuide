@@ -2,3 +2,4 @@
 - Try to get previous and next pulls into the view if possible
 - Take dungeon map scale into account when zooming
 - Streamlined overall zoom calculation
+- Hull drawing fix should work for all dungeons now
