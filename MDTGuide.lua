@@ -6,14 +6,16 @@ MDTGuideRoute = ""
 MDTGuideOptions = {
     height = 200,
     widthSide = 200,
-    zoom = 1.8,
-    zoomBorder = 20
+    zoom = 1.8
 }
 
 local WIDTH = 840
 local HEIGHT = 555
 local RATIO = WIDTH / HEIGHT
 local MIN_HEIGHT = 150
+local MIN_Y, MAX_Y = 180, 270
+local MIN_X, MAX_X = MIN_Y * RATIO, MAX_Y * RATIO
+local ZOOM_BORDER = 15
 local COLOR_CURR = {0.13, 1, 1}
 local COLOR_DEAD = {0.55, 0.13, 0.13}
 
@@ -241,85 +243,107 @@ end
 function Addon.Zoom(scale, scrollX, scrollY)
     local main = MDT.main_frame
     local scroll, map = main.scrollFrame, main.mapPanelFrame
-
+    
     map:SetScale(scale)
     scroll:SetHorizontalScroll(scrollX)
     scroll:SetVerticalScroll(scrollY)
     MDT:ZoomMap(0)
 end
 
-function Addon.ZoomBy(z)
+
+function Addon.ZoomBy(factor)
     local main = MDT.main_frame
     local scroll, map = main.scrollFrame, main.mapPanelFrame
 
-    local scale = z * map:GetScale()
-    local n = (z-1)/2 / scale
+    local scale = factor * map:GetScale()
+    local n = (factor-1)/2 / scale
     local scrollX = scroll:GetHorizontalScroll() + n * scroll:GetWidth()
     local scrollY = scroll:GetVerticalScroll() + n * scroll:GetHeight()
 
     Addon.Zoom(scale, scrollX, scrollY)
 end
 
-function Addon.ZoomTo(minX, maxY, maxX, minY)
+function Addon.ZoomTo(minX, minY, maxX, maxY)
     local main = MDT.main_frame
 
-    local b = MDTGuideOptions.zoomBorder
-    minX, maxY, maxX, minY = max(0, minX - b), min(0, maxY + b), maxX + b, minY - b
+    local diffX, diffY = maxX - minX, maxY - minY
 
-    local s = MDT:GetScale()
-    local w = main:GetWidth()
-    local h = main:GetHeight()
-
-    minX, maxY, maxX, minY = s*minX, s*maxY, s*maxX, s*minY
-
-    local diffX = maxX - minX
-    local diffY = maxY - minY
-    local scale = 0.8 * min(10, w / diffX, h / diffY)
-    local scrollX = minX + diffX/2 - w/2 / scale
-    local scrollY = -maxY + diffY/2 - h/2 / scale
-
-    Addon.Zoom(scale, scrollX, scrollY)
+    -- Ensure min rect size
+    local scale = MDT:GetScale()
+    local sizeScale = scale * Addon.GetDungeonScale()
+    local sizeX, sizeY = MIN_X * sizeScale, MIN_Y * sizeScale
+    
+    if diffX < sizeX then
+        minX, maxX, diffX = minX - (sizeX - diffX)/2, maxX + (sizeX - diffX)/2, sizeX
+    end    
+    if diffY < sizeY then
+        minY, maxY, diffY = minY - (sizeY - diffY)/2, maxY + (sizeY - diffY)/2, sizeY
+    end
+    
+    -- Get zoom and scroll values
+    local s = min(15, WIDTH / diffX, HEIGHT / diffY)
+    local scrollX = (minX + diffX/2 - WIDTH/s/2) * scale
+    local scrollY = (-maxY + diffY/2 - HEIGHT/s/2) * scale
+    
+    Addon.Zoom(s, scrollX, scrollY)
 end
 
 function Addon.ZoomToPull(n)
     n = n or MDT:GetCurrentPull()
-    local pull = Addon.GetCurrentPulls()[n]
+    local pulls = Addon.GetCurrentPulls() 
+    local pull = pulls[n]
 
+    local dungeonScale = Addon.GetDungeonScale()
+    local sizeScale = MDT:GetScale() * dungeonScale
+    local sizeX, sizeY = MAX_X * sizeScale, MAX_Y * sizeScale
+    
     if pull then
         -- Get best sublevel
         local currSub, minDiff = MDT:GetCurrentSubLevel()
         Addon.IteratePull(pull, function (clone)
-            local diff = clone.sublevel - currSub
-            if not minDiff or abs(diff) < abs(minDiff) or abs(diff) == abs(minDiff) and diff < minDiff then
-                minDiff = diff
-            end
-            return minDiff == 0
+                local diff = clone.sublevel - currSub
+                if not minDiff or abs(diff) < abs(minDiff) or abs(diff) == abs(minDiff) and diff < minDiff then
+                    minDiff = diff
+                end
+                return minDiff == 0
         end)
-
-        if not minDiff then return end
-        local bestSub = currSub + minDiff
-
-        -- Get rect to zoom to
-        local minX, minY, maxX, maxY
-        Addon.IteratePull(pull, function (clone)
-            local sub, x, y = clone.sublevel, clone.x, clone.y
-            if sub == bestSub then
-                minX, minY = min(minX or x, x), min(minY or y, y)
-                maxX, maxY = max(maxX or x, x), max(maxY or y, y)
+        
+        if minDiff then
+            local bestSub = currSub + minDiff
+            
+            -- Get rect to zoom to
+            local minX, minY, maxX, maxY = Addon.GetPullRect(n, bestSub)
+            
+            -- Border
+            minX, minY, maxX, maxY = Addon.ExtendRect(minX, minY, maxX, maxY, ZOOM_BORDER * dungeonScale)
+            
+            -- Try to include prev/next pulls
+            for i=1,3 do
+                for p=-i,i,2*i do
+                    pull = pulls[n+p]
+                    
+                    if pull then
+                        local pMinX, pMinY, pMaxX, pMaxY = Addon.CombineRects(minX, minY, maxX, maxY, Addon.GetPullRect(pull, bestSub))
+                        
+                        if pMinX and pMaxX - pMinX <= sizeX and pMaxY - pMinY <= sizeY then
+                            minX, minY, maxX, maxY = pMinX, pMinY, pMaxX, pMaxY
+                        end
+                    end
+                end
             end
-        end)
-
-        -- Change sublevel (if required) and zoom to rect
-        if bestSub and minX and maxY and maxX and minY then
+            
+            -- Change sublevel (if required)
             if bestSub ~= currSub then
                 MDT:SetCurrentSubLevel(bestSub)
                 MDT:UpdateMap(true)
             end
-            Addon.ZoomTo(minX, maxY, maxX, minY)
+            
+            -- Zoom to rect
+            Addon.ZoomTo(minX, minY, maxX, maxY)
+            
+            -- Scroll pull list
+            Addon.ScrollToPull(n)
         end
-
-        -- Scroll pull list
-        Addon.ScrollToPull(n)
     end
 end
 
@@ -718,6 +742,10 @@ function Addon.IsCurrentInstance()
     return currentDungeon == Addon.GetCurrentDungeonId()
 end
 
+function Addon.GetDungeonScale(dungeon)
+    return MDT.scaleMultiplier[dungeon or Addon.GetCurrentDungeonId()] or 1
+end
+
 function Addon.GetCurrentEnemies()
     return MDT.dungeonEnemies[Addon.GetCurrentDungeonId()]
 end
@@ -750,6 +778,34 @@ function Addon.IteratePulls(fn, ...)
     for i,pull in ipairs(Addon.GetCurrentPulls()) do
         local a, b = Addon.IteratePull(pull, fn, i, ...)
         if a then return a, b end
+    end
+end
+
+function Addon.GetPullRect(pull, level)
+    local minX, minY, maxX, maxY
+    Addon.IteratePull(pull, function (clone)
+        local sub, x, y = clone.sublevel, clone.x, clone.y
+        if sub == level then
+            minX, minY = min(minX or x, x), min(minY or y, y)
+            maxX, maxY = max(maxX or x, x), max(maxY or y, y)
+        end
+    end)
+    return minX, minY, maxX, maxY
+end
+
+function Addon.ExtendRect(minX, minY, maxX, maxY, left, top, right, bottom)
+    if minX and left then
+        top = top or left
+        right = right or left
+        bottom = bottom or top
+        return max(0, minX - left), min(0, minY - top), maxX + right, maxY + bottom
+    end
+end
+
+function Addon.CombineRects(minX, minY, maxX, maxY, minX2, minY2, maxX2, maxY2)
+    if minX and minX2 then
+        local diffX, diffY = max(0, minX - minX2, maxX2 - maxX), max(0, minY - minY2, maxY2 - maxY)
+        return Addon.ExtendRect(minX, minY, maxX, maxY, diffX, diffY)
     end
 end
 

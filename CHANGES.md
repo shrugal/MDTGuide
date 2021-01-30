@@ -1,6 +1,4 @@
-- Made addon work with alternative MDT addons
-- Added "/mdtg height" command and restored resizer in guide mode to change window size
-- Adjusted zoom behavior a bit
-- Fixed hull-line width and distance to enemy groups on the map
-- Fixed breaking dev-mode
-- Added missing starting locations for route prediction in Shadowlands dungeons
+- Keep zoom level between certain min and max values if possible
+- Try to get previous and next pulls into the view if possible
+- Take dungeon map scale into account when zooming
+- Streamlined overall zoom calculation
