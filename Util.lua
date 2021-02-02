@@ -103,6 +103,6 @@ function Addon.FindWhere(tbl, key1, val1, key2, val2)
     end
 end
 
-Addon.debug = function (...)
+Addon.Debug = function (...)
     if Addon.DEBUG then print(...) end
 end

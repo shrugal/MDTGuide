@@ -464,7 +464,7 @@ function Addon.GetFramesToHide()
 end
 
 -- ---------------------------------------
---                 Hooks
+--              Events/Hooks
 -- ---------------------------------------
 
 local Frame = CreateFrame("Frame")
@@ -574,11 +574,14 @@ local OnEvent = function (_, ev, ...)
                 end
             end
         end
+    elseif ev == "SCENARIO_CRITERIA_UPDATE" and not Addon.IsBFS() then
+        Addon.ZoomToCurrentPull(true)
     end
 end
 
 Frame:SetScript("OnEvent", OnEvent)
 Frame:RegisterEvent("ADDON_LOADED")
+Frame:RegisterEvent("SCENARIO_CRITERIA_UPDATE")
 
 -- ---------------------------------------
 --                  CLI

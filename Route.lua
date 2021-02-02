@@ -2,9 +2,7 @@ local Name, Addon = ...
 
 -- Use route estimation
 Addon.BFS = false
--- # of hops before limiting branching
-Addon.BFS_BRANCH = 2
--- \# of hops to track back from previous result
+-- # of hops to track back from previous result
 Addon.BFS_TRACK_BACK = 15
 -- Distance weight to same pull
 Addon.BFS_WEIGHT_PULL = 0.1
@@ -12,7 +10,7 @@ Addon.BFS_WEIGHT_PULL = 0.1
 Addon.BFS_WEIGHT_FORWARD = 0.3
 -- Distance weight to a previous pull
 Addon.BFS_WEIGHT_ROUTE = 0.5
--- Distance weight to same group
+-- Distance weight to same group but different sublevels
 Addon.BFS_WEIGHT_GROUP = 0.7
 -- Weight by path length
 Addon.BFS_WEIGHT_LENGTH = 0.95
@@ -27,26 +25,17 @@ Addon.BFS_QUEUE_INSERT = 300
 -- Max # of path candidates in the queue
 Addon.BFS_QUEUE_MAX = 1000
 
-local queue, weights, pulls = {}, {}, {}
+local queue, weights = {}, {}
+local pulls, groups = {}, {}
 local hits, kills = {}, {}
 local co, rerun, zoom, retry
 
 local bfs = true
 
+local debug = Addon.Debug
+
 local function Node(enemyId, cloneId)
     return "e" .. enemyId .. "c" .. cloneId
-end
-
-local function Distance(ax, ay, bx, by, from, to)
-    from, to = from or 1, to or 1
-    if from == to then
-        return math.sqrt(math.pow(ax - bx, 2) + math.pow(ay - by, 2))
-    else
-        local POIs = MDT.mapPOIs[Addon.GetCurrentDungeonId()]
-        local p = Addon.FindWhere(POIs[from], "type", "mapLink", "target", to)
-        local t = p and Addon.FindWhere(POIs[to], "type", "mapLink", "connectionIndex", p.connectionIndex)
-        return t and Distance(ax, ay, p.x, p.y) + Distance(t.x, t.y, bx, by) or math.huge
-    end
 end
 
 local function Path(path, node)
@@ -65,12 +54,25 @@ local function Contains(path, node)
 end
 
 local function Last(path, enemies)
-    local enemyId, cloneId = path:match("-e(%d+)c(%d+)-$")
-    if enemyId and cloneId then
-        if enemies then
-            return enemies[tonumber(enemyId)].clones[tonumber(cloneId)]
+    if path == "" then
+        local dungeon = Addon.GetCurrentDungeonId()
+
+        if Addon.dungeons[dungeon] and Addon.dungeons[dungeon].start then
+            return nil, Addon.dungeons[dungeon].start
         else
-            return Node(enemyId, cloneId)
+            for _,poi in ipairs(MDT.mapPOIs[dungeon][1]) do
+                if poi.type == "graveyard" then
+                    return nil, poi
+                end
+            end
+        end
+
+        debug("No starting point!")
+        return
+    else
+        local enemyId, cloneId = path:match("-e(%d+)c(%d+)-$")
+        if enemyId and cloneId then
+            return Node(enemyId, cloneId), enemies and enemies[tonumber(enemyId)].clones[tonumber(cloneId)]
         end
     end
 end
@@ -79,38 +81,70 @@ local function Length(path)
     return path:gsub("e%d+c%d+", ""):len() / 2
 end
 
-local function Weight(path, weight, length, prev, curr, prevNode, currNode)
-    if weight then
-        local prevPull, currPull = prevNode and pulls[prevNode], currNode and pulls[currNode]
-        local dist =
-            -- Base distance
-            Distance(prev.x, prev.y, curr.x, curr.y, prev.sublevel, curr.sublevel)
-            -- Weighted by group
-            * (prev.g and curr.g and prev.g == curr.g and Addon.BFS_WEIGHT_GROUP or 1)
-            -- Weighted by direction
-            * (currPull and (prevPull and (prevPull == currPull and Addon.BFS_WEIGHT_PULL or prevPull < currPull and Addon.BFS_WEIGHT_FORWARD) or Addon.BFS_WEIGHT_ROUTE) or 1)
+local function Position(clone)
+    local grp = clone.g and groups[clone.g]
+    return grp and grp.sublevel and grp or clone
+end
 
-            weights[path] = (weight * length * Addon.BFS_WEIGHT_LENGTH + dist) / (length + 1)
+local function Distance(a, b)
+    a, b = Position(a), Position(b)
+    local from, to = a.sublevel or 1, b.sublevel or 1
+
+    if from == to then
+        return math.sqrt(math.pow(a.x - b.x, 2) + math.pow(a.y - b.y, 2))
+    else
+        local POIs = MDT.mapPOIs[Addon.GetCurrentDungeonId()]
+        local p = Addon.FindWhere(POIs[from], "type", "mapLink", "target", to)
+        local t = p and Addon.FindWhere(POIs[to], "type", "mapLink", "connectionIndex", p.connectionIndex)
+        return t and Distance(a, p) + Distance(t, b) or math.huge
+    end
+end
+
+local function Weight(path, enemies)
+    if path == "" then
+        return 0
+    elseif not weights[path] then
+        enemies = enemies or Addon.GetCurrentEnemies()
+        local parent = Sub(path, 1)
+        local prevWeight, prevLength = Weight(parent), Length(parent)
+        local prevNode, prev = Last(parent, enemies)
+        local prevPull = prevNode and pulls[prevNode]
+
+        local currNode, curr = Last(path, enemies)
+        local currPull = currNode and pulls[currNode]
+        
+        -- Base distance
+        local dist = Distance(prev, curr)
+
+        -- Weighted by group
+        if prev.g and curr.g and prev.g == curr.g then
+            dist = dist * Addon.BFS_WEIGHT_GROUP
+        end
+
+        -- Weighted by direction
+        if currPull then
+            if not prevPull or prevPull > currPull then
+                dist = dist * Addon.BFS_WEIGHT_ROUTE
+            elseif prevPull == currPull then
+                dist = dist * Addon.BFS_WEIGHT_PULL
+            else
+                dist = dist * Addon.BFS_WEIGHT_FORWARD
+            end
+        end
+
+        weights[path] = prevWeight + (dist - prevWeight) / (prevLength + 1)
     end
     return weights[path]
 end
 
-local function Insert(path, length, weight)
-    length, weight = length or Length(path), weight or Weight(path)
+local function Insert(path)
+    local weight = Weight(path)
     local lft, rgt = 1, #queue+1
 
     while rgt > lft do
         local m = math.floor(lft + (rgt - lft) / 2)
-        local p = queue[m]
-        local w, l = Weight(p), Length(p)
 
-        if l ~= length and (length <= Addon.BFS_BRANCH or l <= Addon.BFS_BRANCH) then
-            if length < l then
-                rgt = m
-            else
-                lft = m+1
-            end
-        elseif weight < w then
+        if weight < Weight(queue[m]) then
             rgt = m
         else
             lft = m+1
@@ -125,34 +159,71 @@ local function Insert(path, length, weight)
     end
 end
 
+local function DeepSearch(path, enemies)
+    local enemyId = kills[Length(path)+1]
+    local res
+
+    if enemies and enemyId and enemies[enemyId] then
+        for cloneId,clone in pairs(enemies[enemyId].clones) do
+            local node = Node(enemyId, cloneId)
+
+            if not Contains(path, node) then
+                local p = DeepSearch(Path(path, node), enemies)
+
+                if not res or Weight(p) < Weight(res) then
+                    res = p
+
+                    if enemies.sublevel then
+                        break
+                    end
+                end
+            end
+        end
+    end
+    
+    return res or path
+end
+
+local function WideSearch(path, enemies, grps)
+    local enemyId = kills[Length(path)+1]
+    local found
+
+    if enemies and enemyId and enemies[enemyId] then
+        for cloneId,clone in pairs(enemies[enemyId].clones) do
+            local node = Node(enemyId, cloneId)
+
+            if not Contains(path, node) then
+                local p = DeepSearch(Path(path, node), groups[clone.g])
+                local w = Weight(p)
+
+                if w < math.huge then
+                    found = true
+                    if not clone.g then
+                        Insert(p)
+                    elseif not grps[clone.g] or w < Weight(grps[clone.g]) then
+                        grps[clone.g] = p
+                    end
+                end
+            end
+        end
+    end
+
+    if grps then
+        for _,p in pairs(grps) do Insert(p) end
+    end
+    
+    return found
+end
+
 function Addon.CalculateRoute()
     local dungeon = Addon.GetCurrentDungeonId()
     local enemies = Addon.GetCurrentEnemies()
-    local t, i, n, g = GetTime(), 1, 1, {}
+    local t, i, n, grps = GetTime(), 1, 1, {}
 
     -- Start route
     local start = Sub(MDTGuideRoute, Addon.BFS_TRACK_BACK)
     queue[1] = start
     weights[start] = 0
-
-    -- Start POI
-    if start == "" then
-        if Addon.dungeons[dungeon] and Addon.dungeons[dungeon].start then
-            start = Addon.dungeons[dungeon].start
-        else
-            for _,poi in ipairs(MDT.mapPOIs[dungeon][1]) do
-                if poi.type == "graveyard" then
-                    start = poi
-                    break
-                end
-            end
-        end
-
-        if not start or start == "" then
-            Addon.debug("No starting point!")
-            return
-        end
-    end
 
     while true do
         local total = GetTime() - t
@@ -168,54 +239,29 @@ function Addon.CalculateRoute()
         end
 
         local path = table.remove(queue, 1)
+
+        -- Failure or success
         if not path then
-            Addon.debug("No path found!")
+            print("|cff00bbbb[MDTGuide]|r Route calculation didn't work, switching to enemy forces mode!")
+            bfs, rerun = false, false
             break
-        end
-
-        local weight, length, last, lastNode = Weight(path), Length(path), Last(path, enemies) or start, Last(path)
-        local enemyId = Addon.kills[length+1]
-
-        -- Success
-        if length == #Addon.kills then
+        elseif Length(path) == #kills then
             MDTGuideRoute = path
             break
         end
 
-        -- Next step
-        local found
-        for cloneId,clone in ipairs(enemies[enemyId].clones) do
-            local node = Node(enemyId, cloneId)
-            if not Contains(path, node) then
-                local p = Path(path, node)
-                local w = Weight(p, weight, length, last, clone, lastNode, node)
-                if w < math.huge then
-                    found = true
-                    if not clone.g then
-                        Insert(p, length+1, w)
-                    elseif not g[clone.g] or w < Weight(g[clone.g]) then
-                        g[clone.g] = p
-                    end
-                end
-            end
-        end
+        -- Find next paths
+        local found = WideSearch(path, enemies, grps)
 
-        -- Insert grouped and proceed or retry with next enemy
-        if found then
-            for _,p in pairs(g) do Insert(p, length+1) end
-            weights[path] = nil
-        else
-            table.remove(Addon.kills, length+1)
+        -- Skip current enemy if no path was found
+        if not found then
+            table.remove(kills, length+1)
             table.insert(queue, 1, path)
         end
 
         i, n = i+1, n+1
-        wipe(g)
+        wipe(grps)
     end
-
-    Addon.debug("N", n)
-    Addon.debug("Time", GetTime() - t)
-    Addon.debug("Queue", #queue)
 
     wipe(queue)
     wipe(weights)
@@ -255,7 +301,7 @@ end
 function Addon.AddKill(npcId)
     for i,enemy in ipairs(MDT.dungeonEnemies[Addon.currentDungeon]) do
         if enemy.id == npcId then
-            table.insert(Addon.kills, i)
+            table.insert(kills, i)
             return i
         end
     end
@@ -286,9 +332,29 @@ end
 
 function Addon.SetDungeon()
     wipe(pulls)
-    Addon.IteratePulls(function (_, _, cloneId, enemyId, _, pullId)
+    wipe(groups)
+
+    Addon.IteratePulls(function (clone, _, cloneId, enemyId, _, pullId)
         pulls[Node(enemyId, cloneId)] = pullId
+
+        if clone.g then
+            groups[clone.g] = groups[clone.g] or { x = 0, y = 0 }
+            local grp = groups[clone.g]
+
+            grp[enemyId] = grp[enemyId] or { clones = {} }
+            grp[enemyId].clones[cloneId] = clone
+
+            if grp.sublevel == nil or grp.sublevel == clone.sublevel then
+                grp.sublevel = clone.sublevel
+                grp.x = grp.x + (clone.x - grp.x) / #grp
+                grp.y = grp.y + (clone.y - grp.y) / #grp
+            else
+                grp.sublevel = false
+                grp.x, grp.y = nil
+            end
+        end
     end)
+
     Addon.UpdateRoute()
 end
 
@@ -318,10 +384,8 @@ local OnEvent = function (_, ev, ...)
                     Addon.SetInstanceDungeon(dungeon)
 
                     if dungeon then
-                        Addon.debug("REGISTER")
                         Frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
                     else
-                        Addon.debug("UNREGISTER")
                         Frame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
                     end
                 end
@@ -335,18 +399,14 @@ local OnEvent = function (_, ev, ...)
             Frame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
         end
     elseif ev == "SCENARIO_COMPLETED" or ev == "CHAT_MSG_SYSTEM" and (...):match(Addon.PATTERN_INSTANCE_RESET) then
-        Addon.debug("RESET")
         Addon.SetInstanceDungeon()
         Frame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-    elseif ev == "SCENARIO_CRITERIA_UPDATE" and not Addon.IsBFS() then
-        Addon.ZoomToCurrentPull(true)
     elseif ev == "COMBAT_LOG_EVENT_UNFILTERED" then
         local _, event, _, _, _, sourceFlags, _, destGUID, _, destFlags = CombatLogGetCurrentEventInfo()
 
         if event == "UNIT_DIED" then
-            if Addon.hits[destGUID] then
-                Addon.debug("KILL")
-                Addon.hits[destGUID] = nil
+            if hits[destGUID] then
+                hits[destGUID] = nil
                 local npcId = Addon.GetNPCId(destGUID)
                 if Addon.AddKill(npcId) and Addon.IsBFS() then
                     Addon.ZoomToCurrentPull(true)
@@ -355,9 +415,8 @@ local OnEvent = function (_, ev, ...)
         elseif event:match("DAMAGE") or event:match("AURA_APPLIED") then
             local sourceIsParty = bit.band(sourceFlags, COMBATLOG_OBJECT_AFFILIATION_OUTSIDER) == 0
             local destIsEnemy = bit.band(destFlags, COMBATLOG_OBJECT_AFFILIATION_OUTSIDER) > 0 and bit.band(destFlags, COMBATLOG_OBJECT_REACTION_FRIENDLY) == 0
-            if sourceIsParty and destIsEnemy and not Addon.hits[destGUID] then
-                Addon.debug("HIT")
-                Addon.hits[destGUID] = true
+            if sourceIsParty and destIsEnemy and not hits[destGUID] then
+                hits[destGUID] = true
             end
         end
     end
@@ -379,6 +438,5 @@ end
 Frame:SetScript("OnEvent", OnEvent)
 Frame:SetScript("OnUpdate", OnUpdate)
 Frame:RegisterEvent("PLAYER_ENTERING_WORLD")
-Frame:RegisterEvent("SCENARIO_CRITERIA_UPDATE")
 Frame:RegisterEvent("SCENARIO_COMPLETED")
 Frame:RegisterEvent("CHAT_MSG_SYSTEM")
