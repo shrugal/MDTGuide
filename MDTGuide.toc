@@ -7,7 +7,9 @@
 ## SavedVariables: MDTGuideActive, MDTGuideRoute, MDTGuideOptions
 
 Data.lua
-MDTGuide.lua
+Util.lua
+Route.lua
+Main.lua
 
 #@do-not-package@
 ## Version: 0-dev0
