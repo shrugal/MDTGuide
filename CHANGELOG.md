@@ -1,3 +1,10 @@
+Version 1.03
+- Keep zoom level between certain min and max values if possible
+- Try to get previous and next pulls into the view if possible
+- Take dungeon map scale into account when zooming
+- Streamlined overall zoom calculation
+- Hull drawing fix should work for all dungeons now
+
 Version 1.02
 - Made addon work with alternative MDT addons
 - Added "/mdtg height" command and restored resizer in guide mode to change window size

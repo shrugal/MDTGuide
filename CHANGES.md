@@ -1,5 +1,3 @@
-- Keep zoom level between certain min and max values if possible
-- Try to get previous and next pulls into the view if possible
-- Take dungeon map scale into account when zooming
-- Streamlined overall zoom calculation
-- Hull drawing fix should work for all dungeons now
+- Updated toc version for patch 9.0.5
+- Vastly improved route estimation performance by doing a deep search inside enemy groups
+- Refactored code
