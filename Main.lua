@@ -313,19 +313,9 @@ function Addon.ZoomToPull(n, fromSub)
     local sizeX, sizeY = Addon.MAX_X * sizeScale, Addon.MAX_Y * sizeScale
     
     if pull then
-        -- Get best sublevel
-        local currSub, minDiff = MDT:GetCurrentSubLevel()
-        Addon.IteratePull(pull, function (clone)
-            local diff = clone.sublevel - currSub
-            if not minDiff or abs(diff) < abs(minDiff) or abs(diff) == abs(minDiff) and diff < minDiff then
-                minDiff = diff
-            end
-            return minDiff == 0
-        end)
-        
-        if minDiff then
-            local bestSub = currSub + minDiff
-            
+        local bestSub = Addon.GetBestSubLevel(pull)
+
+        if bestSub then
             -- Get rect to zoom to
             local minX, minY, maxX, maxY = Addon.GetPullRect(n, bestSub)
             
@@ -681,19 +671,15 @@ local OnEvent = function (_, ev, ...)
                 fromSub = MDT:GetCurrentSubLevel()
                 origFn(...)
             end
-
-            -- Hook map update
-            local updatingMap
-            local origFn = MDT.UpdateMap
-            MDT.UpdateMap = function (...)
-                updatingMap = true
+            local origFn = MDT.SetCurrentSubLevel
+            MDT.SetCurrentSubLevel = function (...)
+                fromSub = MDT:GetCurrentSubLevel()
                 origFn(...)
-                updatingMap = nil
             end
 
             -- Hook pull selection
             hooksecurefunc(MDT, "SetSelectionToPull", function (_, pull)
-                if not updatingMap and Addon.IsActive() and tonumber(pull) then
+                if  Addon.IsActive() and tonumber(pull) and Addon.GetLastSubLevel(pull) == MDT:GetCurrentSubLevel() then
                     Addon.ZoomToPull(pull, fromSub)
                 end
                 fromSub = nil

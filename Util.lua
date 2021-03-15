@@ -95,6 +95,24 @@ function Addon.CombineRects(minX, minY, maxX, maxY, minX2, minY2, maxX2, maxY2)
     end
 end
 
+function Addon.GetBestSubLevel(pull)
+    local currSub, minDiff = MDT:GetCurrentSubLevel()
+    Addon.IteratePull(pull, function (clone)
+        local diff = clone.sublevel - currSub
+        if not minDiff or abs(diff) < abs(minDiff) or abs(diff) == abs(minDiff) and diff < minDiff then
+            minDiff = diff
+        end
+        return minDiff == 0
+    end)
+    return minDiff and currSub + minDiff
+end
+
+function Addon.GetLastSubLevel(pull)
+    local sublevel
+    Addon.IteratePull(pull, function (clone) sublevel = clone.sublevel or sublevel end)
+    return sublevel
+end
+
 function Addon.FindWhere(tbl, key1, val1, key2, val2)
     for i,v in pairs(tbl) do
         if v[key1] == val1 and (not key2 or v[key2] == val2) then
