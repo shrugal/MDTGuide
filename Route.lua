@@ -4,16 +4,12 @@ local Name, Addon = ...
 Addon.BFS = false
 -- # of hops to track back from previous result
 Addon.BFS_TRACK_BACK = 15
--- Distance weight to same pull
-Addon.BFS_WEIGHT_PULL = 0.1
--- Distance weight to a following pull
-Addon.BFS_WEIGHT_FORWARD = 0.3
--- Distance weight to a previous pull
+-- Distance weight to route
 Addon.BFS_WEIGHT_ROUTE = 0.5
+-- Distance weight to a following pull
+Addon.BFS_WEIGHT_FORWARD = 0.5
 -- Distance weight to same group but different sublevels
 Addon.BFS_WEIGHT_GROUP = 0.7
--- Weight by path length
-Addon.BFS_WEIGHT_LENGTH = 0.95
 -- Max rounds per frame
 Addon.BFS_MAX_FRAME = 15
 -- Scale MAX_FRAME with elapsed time
@@ -123,16 +119,17 @@ local function Weight(path, enemies)
 
         -- Weighted by direction
         if currPull then
-            if not prevPull or prevPull > currPull then
+            if not prevPull then
                 dist = dist * Addon.BFS_WEIGHT_ROUTE
-            elseif prevPull == currPull then
-                dist = dist * Addon.BFS_WEIGHT_PULL
             else
-                dist = dist * Addon.BFS_WEIGHT_FORWARD
+                local diff = abs(currPull - prevPull) / #Addon.GetCurrentPulls()
+                local forward = currPull > prevPull and Addon.BFS_WEIGHT_FORWARD or 1
+                dist = dist * diff * forward
             end
         end
 
-        weights[path] = prevWeight + (dist - prevWeight) / (prevLength + 1)
+        -- weights[path] = prevWeight + (dist - prevWeight) / (prevLength + 1)
+        weights[path] = prevWeight + dist
     end
     return weights[path]
 end
@@ -163,7 +160,7 @@ local function DeepSearch(path, enemies)
     local enemyId = kills[Length(path)+1]
     local res
 
-    if enemies and enemyId and enemies[enemyId] then
+    if enemies and enemies[enemyId] then
         for cloneId,clone in pairs(enemies[enemyId].clones) do
             local node = Node(enemyId, cloneId)
 
@@ -188,7 +185,7 @@ local function WideSearch(path, enemies, grps)
     local enemyId = kills[Length(path)+1]
     local found
 
-    if enemies and enemyId and enemies[enemyId] then
+    if enemies and enemies[enemyId] then
         for cloneId,clone in pairs(enemies[enemyId].clones) do
             local node = Node(enemyId, cloneId)
 
@@ -208,16 +205,16 @@ local function WideSearch(path, enemies, grps)
         end
     end
 
-    if grps then
-        for _,p in pairs(grps) do Insert(p) end
+    for _,p in pairs(grps) do
+        Insert(p)
     end
     
     return found
 end
 
 function Addon.CalculateRoute()
-    local dungeon = Addon.GetCurrentDungeonId()
     local enemies = Addon.GetCurrentEnemies()
+    local dungeon = Addon.GetCurrentDungeonId()
     local t, i, n, grps = GetTime(), 1, 1, {}
 
     -- Start route
@@ -262,6 +259,10 @@ function Addon.CalculateRoute()
         i, n = i+1, n+1
         wipe(grps)
     end
+
+    debug("LOOPS", n)
+    debug("TIME", GetTime() - t)
+    debug("QUEUE", #queue)
 
     wipe(queue)
     wipe(weights)
