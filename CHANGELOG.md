@@ -1,3 +1,9 @@
+Version 1.04
+- Updated toc version for patch 9.0.5
+- Added button to zoom to current pull
+- Added button to announce selected or selected and following pulls
+- Vastly improved route estimation performance by doing a deep search inside enemy groups
+
 Version 1.03
 - Keep zoom level between certain min and max values if possible
 - Try to get previous and next pulls into the view if possible

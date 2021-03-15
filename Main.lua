@@ -25,6 +25,7 @@ Addon.currentDungeon = nil
 
 local toggleBtn, currentPullBtn, announceBtn = nil
 local frames = nil
+local zoomAnimGrp = nil
 
 -- ---------------------------------------
 --              Toggle mode
@@ -209,16 +210,53 @@ end
 --                 Zoom
 -- ---------------------------------------
 
-function Addon.Zoom(scale, scrollX, scrollY)
+function Addon.Zoom(s, x, y, smooth)
     local main = MDT.main_frame
     local scroll, map = main.scrollFrame, main.mapPanelFrame
-    
-    map:SetScale(scale)
-    scroll:SetHorizontalScroll(scrollX)
-    scroll:SetVerticalScroll(scrollY)
-    MDT:ZoomMap(0)
-end
 
+    -- Don't go out of bounds
+    local scale = MDT:GetScale()
+    local width, height = Addon.WIDTH * scale, Addon.HEIGHT * scale
+   
+   if x > width * (1 - 1/s) then
+      local diff = x + width * (1/s - 1)
+      x, y, s = x + diff, y + diff * (1 / Addon.RATIO), 1 / (1 - (x + diff) / width)
+   end
+   if y > height * (1 - 1/s) then
+      local diff = y + height * (1/s - 1)
+      y, x, s = y + diff, x + diff * Addon.RATIO, 1 / (1 - (y + diff) / height)
+   end
+
+    if zoomAnimGrp then
+        zoomAnimGrp = zoomAnimGrp:Stop()
+    end
+    
+    if smooth then
+        local fromS = map:GetScale()
+        local fromX = scroll:GetHorizontalScroll()
+        local fromY = scroll:GetVerticalScroll()
+        zoomAnimGrp = main:CreateAnimationGroup()
+        local anim = zoomAnimGrp:CreateAnimation("Animation")
+        anim:SetDuration(0.4)
+        anim:SetSmoothing("IN_OUT")
+        anim:SetScript("OnUpdate", function ()
+            local p = anim:GetSmoothProgress()
+            map:SetScale(fromS + (s - fromS) * p)
+            scroll:SetHorizontalScroll(fromX + (x - fromX) * p)
+            scroll:SetVerticalScroll(fromY + (y - fromY) * p)
+        end)
+        anim:SetScript("OnFinished", function ()
+            zoomAnimGrp = nil
+            MDT:ZoomMap(0)
+        end)
+        zoomAnimGrp:Play()
+    else
+        map:SetScale(s)
+        scroll:SetHorizontalScroll(x)
+        scroll:SetVerticalScroll(y)
+        MDT:ZoomMap(0)
+    end
+end
 
 function Addon.ZoomBy(factor)
     local main = MDT.main_frame
@@ -232,8 +270,16 @@ function Addon.ZoomBy(factor)
     Addon.Zoom(scale, scrollX, scrollY)
 end
 
-function Addon.ZoomTo(minX, minY, maxX, maxY)
+function Addon.ZoomTo(minX, minY, maxX, maxY, subLevel, fromSub)
     local main = MDT.main_frame
+            
+    -- Change sublevel if required
+    local currSub = MDT:GetCurrentSubLevel()
+    subLevel, fromSub = subLevel or currSub, fromSub or currSub
+    if subLevel ~= currSub then
+        MDT:SetCurrentSubLevel(subLevel)
+        MDT:UpdateMap(true)
+    end
 
     local diffX, diffY = maxX - minX, maxY - minY
 
@@ -248,16 +294,16 @@ function Addon.ZoomTo(minX, minY, maxX, maxY)
     if diffY < sizeY then
         minY, maxY, diffY = minY - (sizeY - diffY)/2, maxY + (sizeY - diffY)/2, sizeY
     end
+   
+   -- Get zoom and scroll values
+   local s = min(15, Addon.WIDTH / diffX, Addon.HEIGHT / diffY)
+   local scrollX = minX + diffX/2 - Addon.WIDTH/s/2
+   local scrollY = -maxY + diffY/2 - Addon.HEIGHT/s/2
     
-    -- Get zoom and scroll values
-    local s = min(15, Addon.WIDTH / diffX, Addon.HEIGHT / diffY)
-    local scrollX = (minX + diffX/2 - Addon.WIDTH/s/2) * scale
-    local scrollY = (-maxY + diffY/2 - Addon.HEIGHT/s/2) * scale
-    
-    Addon.Zoom(s, scrollX, scrollY)
+    Addon.Zoom(s, scrollX * scale, scrollY * scale, subLevel == fromSub)
 end
 
-function Addon.ZoomToPull(n)
+function Addon.ZoomToPull(n, fromSub)
     n = n or MDT:GetCurrentPull()
     local pulls = Addon.GetCurrentPulls() 
     local pull = pulls[n]
@@ -270,11 +316,11 @@ function Addon.ZoomToPull(n)
         -- Get best sublevel
         local currSub, minDiff = MDT:GetCurrentSubLevel()
         Addon.IteratePull(pull, function (clone)
-                local diff = clone.sublevel - currSub
-                if not minDiff or abs(diff) < abs(minDiff) or abs(diff) == abs(minDiff) and diff < minDiff then
-                    minDiff = diff
-                end
-                return minDiff == 0
+            local diff = clone.sublevel - currSub
+            if not minDiff or abs(diff) < abs(minDiff) or abs(diff) == abs(minDiff) and diff < minDiff then
+                minDiff = diff
+            end
+            return minDiff == 0
         end)
         
         if minDiff then
@@ -301,14 +347,8 @@ function Addon.ZoomToPull(n)
                 end
             end
             
-            -- Change sublevel (if required)
-            if bestSub ~= currSub then
-                MDT:SetCurrentSubLevel(bestSub)
-                MDT:UpdateMap(true)
-            end
-            
             -- Zoom to rect
-            Addon.ZoomTo(minX, minY, maxX, maxY)
+            Addon.ZoomTo(minX, minY, maxX, maxY, bestSub, fromSub)
             
             -- Scroll pull list
             Addon.ScrollToPull(n)
@@ -634,11 +674,20 @@ local OnEvent = function (_, ev, ...)
                 Addon.SetDungeon()
             end)
 
+            -- Hook sublevel selection
+            local fromSub
+            local origFn = MDT.SetMapSublevel
+            MDT.SetMapSublevel = function (...)
+                fromSub = MDT:GetCurrentSubLevel()
+                origFn(...)
+            end
+
             -- Hook pull selection
             hooksecurefunc(MDT, "SetSelectionToPull", function (_, pull)
                 if Addon.IsActive() and tonumber(pull) then
-                    Addon.ZoomToPull(pull)
+                    Addon.ZoomToPull(pull, fromSub)
                 end
+                fromSub = nil
             end)
 
             -- Hook pull tooltip
