@@ -71,6 +71,7 @@ function Addon.EnableGuideMode(noZoom)
     main.closeButton:SetPoint("TOPRIGHT", f, "TOPRIGHT", 7, 4)
     toggleBtn:SetPoint("RIGHT", main.closeButton, "LEFT")
     currentPullBtn:Show()
+    announceBtn:Show()
 
     -- Adjust enemy info
     f = main.sidePanel.PullButtonScrollGroup
@@ -128,6 +129,7 @@ function Addon.DisableGuideMode()
     main.closeButton:SetPoint("TOPRIGHT", f, "TOPRIGHT")
     toggleBtn:SetPoint("RIGHT", main.maximizeButton, "LEFT", 10, 0)
     currentPullBtn:Hide()
+    announceBtn:Hide()
 
     -- Reset enemy info
     f = main.sidePanel.PullButtonScrollGroup.frame
