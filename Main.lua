@@ -682,9 +682,18 @@ local OnEvent = function (_, ev, ...)
                 origFn(...)
             end
 
+            -- Hook map update
+            local updatingMap
+            local origFn = MDT.UpdateMap
+            MDT.UpdateMap = function (...)
+                updatingMap = true
+                origFn(...)
+                updatingMap = nil
+            end
+
             -- Hook pull selection
             hooksecurefunc(MDT, "SetSelectionToPull", function (_, pull)
-                if Addon.IsActive() and tonumber(pull) then
+                if not updatingMap and Addon.IsActive() and tonumber(pull) then
                     Addon.ZoomToPull(pull, fromSub)
                 end
                 fromSub = nil

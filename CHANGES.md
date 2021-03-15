@@ -1,1 +1,2 @@
 - Added smooth transitions between pulls
+- Fix switching sublevels manually in guide mode
