@@ -1,3 +1,4 @@
 - Updated toc version for patch 9.0.5
+- Added button to zoom to current pull
+- Added button to announce selected or selected and following pulls
 - Vastly improved route estimation performance by doing a deep search inside enemy groups
-- Refactored code

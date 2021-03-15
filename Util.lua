@@ -106,3 +106,15 @@ end
 Addon.Debug = function (...)
     if Addon.DEBUG then print(...) end
 end
+
+Addon.Echo = function (title, line, ...)
+    print("|cff00bbbb[MDTGuide]|r " .. (title and title ..": " or "") .. (line or ""), ...)
+end
+
+Addon.Chat = function (msg)
+    if IsInGroup() then
+        SendChatMessage(msg, IsInGroup(LE_PARTY_CATEGORY_INSTANCE) and "INSTANCE_CHAT" or "PARTY")
+    else
+        Addon.Echo(nil, msg)
+    end
+end

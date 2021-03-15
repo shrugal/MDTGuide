@@ -23,7 +23,8 @@ Addon.PATTERN_INSTANCE_RESET = "^" .. INSTANCE_RESET_SUCCESS:gsub("%%s", ".+") .
 
 Addon.currentDungeon = nil
 
-local toggleButton, frames = nil
+local toggleBtn, currentPullBtn, announceBtn = nil
+local frames = nil
 
 -- ---------------------------------------
 --              Toggle mode
@@ -68,7 +69,8 @@ function Addon.EnableGuideMode(noZoom)
     f:SetPoint("TOPLEFT", main, "TOPRIGHT", 0, 25)
     f:SetPoint("BOTTOMLEFT", main, "BOTTOMRIGHT", 0, -20)
     main.closeButton:SetPoint("TOPRIGHT", f, "TOPRIGHT", 7, 4)
-    toggleButton:SetPoint("RIGHT", main.closeButton, "LEFT")
+    toggleBtn:SetPoint("RIGHT", main.closeButton, "LEFT")
+    currentPullBtn:Show()
 
     -- Adjust enemy info
     f = main.sidePanel.PullButtonScrollGroup
@@ -124,7 +126,8 @@ function Addon.DisableGuideMode()
     f:SetPoint("TOPLEFT", main, "TOPRIGHT", 0, 30)
     f:SetPoint("BOTTOMLEFT", main, "BOTTOMRIGHT", 0, -30)
     main.closeButton:SetPoint("TOPRIGHT", f, "TOPRIGHT")
-    toggleButton:SetPoint("RIGHT", main.maximizeButton, "LEFT", 10, 0)
+    toggleBtn:SetPoint("RIGHT", main.maximizeButton, "LEFT", 10, 0)
+    currentPullBtn:Hide()
 
     -- Reset enemy info
     f = main.sidePanel.PullButtonScrollGroup.frame
@@ -338,6 +341,52 @@ function Addon.ScrollToPull(n, center)
 end
 
 -- ---------------------------------------
+--             Announce
+-- ---------------------------------------
+
+function Addon.AnnouncePull(n)
+    n = n or MDT:GetCurrentPreset().value.currentPull
+    if not n then return end
+
+    local enemies = Addon.GetCurrentEnemies()
+
+    local pull = Addon.GetCurrentPulls()[n]
+    if not pull then return end
+
+    Addon.Chat("---------- Pull " .. n .. " ----------")
+
+    for enemyId,clones in pairs(pull) do        
+        local enemy = enemies[enemyId]
+        if #clones > 0 and enemy and enemy.name then
+            Addon.Chat(#clones .. "x " .. enemy.name)
+        end
+    end
+
+    local forces = MDT:CountForces(n, true)
+    if forces > 0 then
+        Addon.Chat("Forces: " .. forces .. " => " ..  MDT:FormatEnemyForces(MDT:CountForces(n, false)))
+    end
+end
+
+function Addon.AnnounceSelectedPulls(selection)
+    selection = selection or MDT:GetCurrentPreset().value.selection
+    if not selection then return end
+
+    for _,i in ipairs(selection) do
+        Addon.AnnouncePull(i)
+    end
+end
+
+function Addon.AnnounceNextPulls(n)
+    n = n or MDT:GetCurrentPreset().value.currentPull
+    if not n then return end
+
+    for i=n,#Addon.GetCurrentPulls() do
+        Addon.AnnouncePull(i)
+    end
+end
+
+-- ---------------------------------------
 --             Enemy forces
 -- ---------------------------------------
 
@@ -447,6 +496,10 @@ function Addon.IsActive()
     return MDTGuideActive and main and main:IsShown()
 end
 
+function Addon.IsInRun()
+    return Addon.IsActive() and Addon.IsCurrentInstance() and Addon.GetEnemyForces() and true
+end
+
 function Addon.GetFramesToHide()
     local main = MDT.main_frame
 
@@ -479,19 +532,74 @@ local OnEvent = function (_, ev, ...)
 
             -- Hook showing interface
             hooksecurefunc(MDT, "ShowInterface", function ()
-                -- Insert toggle button
-                if not toggleButton then
-                    local main = MDT.main_frame
+                local main = MDT.main_frame
 
-                    toggleButton = CreateFrame("Button", nil, MDT.main_frame, "MaximizeMinimizeButtonFrameTemplate")
-                    toggleButton[MDTGuideActive and "Minimize" or "Maximize"](toggleButton)
-                    toggleButton:SetOnMaximizedCallback(function () Addon.DisableGuideMode() end)
-                    toggleButton:SetOnMinimizedCallback(function () Addon.EnableGuideMode() end)
-                    toggleButton:Show()
+                -- Insert toggle button
+                if not toggleBtn then
+                    toggleBtn = CreateFrame("Button", nil, MDT.main_frame, "MaximizeMinimizeButtonFrameTemplate")
+                    toggleBtn[MDTGuideActive and "Minimize" or "Maximize"](toggleBtn)
+                    toggleBtn:SetOnMaximizedCallback(function () Addon.DisableGuideMode() end)
+                    toggleBtn:SetOnMinimizedCallback(function () Addon.EnableGuideMode() end)
+                    toggleBtn:Show()
 
                     main.maximizeButton:SetPoint("RIGHT", main.closeButton, "LEFT", 10, 0)
-                    toggleButton:SetPoint("RIGHT", main.maximizeButton, "LEFT", 10, 0)
+                    toggleBtn:SetPoint("RIGHT", main.maximizeButton, "LEFT", 10, 0)
                 end
+
+                -- Insert current pull button
+                if not currentPullBtn then
+                    currentPullBtn = CreateFrame("Button", nil, MDT.main_frame, "SquareIconButtonTemplate")
+                    currentPullBtn:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up")
+                    currentPullBtn:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Down")
+                    currentPullBtn:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-NextPage-Disabled")
+                    currentPullBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
+                    currentPullBtn:SetFrameLevel(4)
+                    currentPullBtn:SetHeight(21)
+                    currentPullBtn:SetWidth(21)
+                    currentPullBtn:SetScript("OnClick", function () Addon.ZoomToCurrentPull() end)
+                    currentPullBtn:SetScript("OnEnter", function ()
+                        GameTooltip:SetOwner(currentPullBtn, "ANCHOR_BOTTOM", 0, 0)
+                        GameTooltip:AddLine("Go to current pull")
+                        GameTooltip:Show()
+                    end)
+                    currentPullBtn:SetScript("OnLeave", function () GameTooltip:Hide() end)
+                    
+                    currentPullBtn:SetPoint("RIGHT", toggleBtn, "LEFT", 0, 0.5)
+                end
+
+                if not announceBtn then
+                    announceBtn = CreateFrame("Button", nil, MDT.main_frame, "SquareIconButtonTemplate")
+                    announceBtn:SetNormalTexture("Interface\\Buttons\\UI-GuildButton-MOTD-Up")
+                    announceBtn:SetDisabledTexture("Interface\\Buttons\\UI-GuildButton-MOTD-Disabled")
+                    announceBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight")
+                    announceBtn:SetFrameLevel(4)
+                    announceBtn:SetHeight(13)
+                    announceBtn:SetWidth(13)
+                    announceBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                    announceBtn:SetScript("OnClick", function (_, btn)
+                        if btn == "RightButton" then
+                            Addon.AnnounceNextPulls()
+                        else
+                            Addon.AnnounceSelectedPulls()
+                        end
+                    end)
+                    announceBtn:SetScript("OnEnter", function ()
+                        GameTooltip:SetOwner(announceBtn, "ANCHOR_BOTTOM", 0, 0)
+                        GameTooltip:AddLine("Announce selected pulls")
+                        GameTooltip:AddLine("Right click: Also announce following pulls", 1, 1, 1, true)
+                        if not IsInGroup() then
+                            GameTooltip:AddLine("(Shows preview while not in a group)", 0.7, 0.7, 0.7, true)
+                        end
+                        GameTooltip:Show()
+                    end)
+                    announceBtn:SetScript("OnLeave", function () GameTooltip:Hide() end)
+                    
+                    announceBtn:SetPoint("RIGHT", currentPullBtn, "LEFT", -8, 0)
+                end
+
+                -- TODO:DEBUG
+                Addon.currentPullBtn = currentPullBtn
+                Addon.announceBtn = announceBtn
 
                 if MDTGuideActive then
                     MDTGuideActive = false
@@ -504,8 +612,8 @@ local OnEvent = function (_, ev, ...)
                 local main = MDT.main_frame
 
                 Addon.DisableGuideMode()
-                if toggleButton then
-                    toggleButton:Hide()
+                if toggleBtn then
+                    toggleBtn:Hide()
                     main.maximizeButton:SetPoint("RIGHT", main.closeButton, "LEFT")
                 end
             end)
@@ -513,8 +621,8 @@ local OnEvent = function (_, ev, ...)
                 local main = MDT.main_frame
 
                 Addon.DisableGuideMode()
-                if toggleButton then
-                    toggleButton:Show()
+                if toggleBtn then
+                    toggleBtn:Show()
                     main.maximizeButton:SetPoint("RIGHT", main.closeButton, "LEFT", 10, 0)
                 end
             end)
@@ -589,29 +697,25 @@ Frame:RegisterEvent("SCENARIO_CRITERIA_UPDATE")
 
 SLASH_MDTG1 = "/mdtg"
 
-local function echo (title, line, ...)
-    print("|cff00bbbb[MDTGuide]|r " .. (title and title ..": " or "") .. (line or ""), ...)
-end
-
 function SlashCmdList.MDTG(args)
     local cmd, arg1 = strsplit(' ', args)
 
     if cmd == "height" then
         arg1 = tonumber(arg1)
         if not arg1 then
-            echo(cmd, "First parameter must be a number.")
+            Addon.Echo(cmd, "First parameter must be a number.")
         else
             Addon.ReloadGuideMode(function ()
                 MDTGuideOptions.height = tonumber(arg1)
             end)
-            echo(cmd, "Height set to " .. arg1 .. ".")
+            Addon.Echo(cmd, "Height set to " .. arg1 .. ".")
         end
     elseif cmd == "route" then
         arg1 = arg1 or not Addon.BFS and "enable"
         Addon.BFS = arg1 == "enable"
-        echo(cmd, "Route predition " .. (Addon.BFS and "enabled" or "disabled"))
+        Addon.Echo(cmd, "Route predition " .. (Addon.BFS and "enabled" or "disabled"))
     else
-        echo("Usage")
+        Addon.Echo("Usage")
         print("|cffbbbbbb/mdtg height [height]|r: Adjust the guide window size by setting the height, default is 200.")
         print("|cffbbbbbb/mdtg route [enable/disable]|r: Enable/Disable/Toggle route estimation.")
         print("|cffbbbbbb/mdtg|r: Print this help message.")
