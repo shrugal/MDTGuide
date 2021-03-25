@@ -6,7 +6,8 @@ MDTGuideRoute = ""
 MDTGuideOptions = {
     height = 200,
     widthSide = 200,
-    zoom = 1.8
+    zoom = 1.8,
+    fade = false
 }
 
 Addon.WIDTH = 840
@@ -23,9 +24,10 @@ Addon.PATTERN_INSTANCE_RESET = "^" .. INSTANCE_RESET_SUCCESS:gsub("%%s", ".+") .
 
 Addon.currentDungeon = nil
 
-local toggleBtn, currentPullBtn, announceBtn = nil
-local frames = nil
-local zoomAnimGrp = nil
+local toggleBtn, currentPullBtn, announceBtn
+local hideFrames, hoverFrames
+local zoomAnimGrp
+local fadeTicker, isFaded
 
 -- ---------------------------------------
 --              Toggle mode
@@ -38,7 +40,7 @@ function Addon.EnableGuideMode(noZoom)
     local main = MDT.main_frame
 
     -- Hide frames
-    for _,f in pairs(Addon.GetFramesToHide()) do
+    for _,f in pairs(Addon.GetHideFrames()) do
        (f.frame or f):Hide()
     end
 
@@ -99,6 +101,9 @@ function Addon.EnableGuideMode(noZoom)
         if v == "MDTFrame" then tremove(UISpecialFrames, i) break end
     end
 
+    -- Set fade
+    Addon.SetFade()
+
     return true
 end
 
@@ -108,7 +113,7 @@ function Addon.DisableGuideMode()
 
     local main = MDT.main_frame
 
-    for _,f in pairs(Addon.GetFramesToHide()) do
+    for _,f in pairs(Addon.GetHideFrames()) do
         (f.frame or f):Show()
     end
 
@@ -160,6 +165,9 @@ function Addon.DisableGuideMode()
         tinsert(UISpecialFrames, "MDTFrame")
     end
 
+    -- Disable fade
+    Addon.SetFade()
+
      return true
 end
 
@@ -206,6 +214,22 @@ function Addon.AdjustEnemyInfo()
     end
 end
 
+function Addon.GetHideFrames()
+    local main = MDT.main_frame
+
+    hideFrames = hideFrames or {
+        main.bottomPanelString,
+        main.sidePanel.WidgetGroup,
+        main.sidePanel.ProgressBar,
+        main.toolbar.toggleButton,
+        main.maximizeButton,
+        main.HelpButton,
+        main.DungeonSelectionGroup
+    }
+
+    return hideFrames
+end
+
 -- ---------------------------------------
 --                 Zoom
 -- ---------------------------------------
@@ -218,14 +242,14 @@ function Addon.Zoom(s, x, y, smooth)
     local scale = MDT:GetScale()
     local width, height = Addon.WIDTH * scale, Addon.HEIGHT * scale
    
-   if x > width * (1 - 1/s) then
-      local diff = x + width * (1/s - 1)
-      x, y, s = x + diff, y + diff * (1 / Addon.RATIO), 1 / (1 - (x + diff) / width)
-   end
-   if y > height * (1 - 1/s) then
-      local diff = y + height * (1/s - 1)
-      y, x, s = y + diff, x + diff * Addon.RATIO, 1 / (1 - (y + diff) / height)
-   end
+    if x > width * (1 - 1/s) then
+        local diff = x + width * (1/s - 1)
+        x, y, s = x + diff, y + diff * (1 / Addon.RATIO), 1 / (1 - (x + diff) / width)
+    end
+    if y > height * (1 - 1/s) then
+        local diff = y + height * (1/s - 1)
+        y, x, s = y + diff, x + diff * Addon.RATIO, 1 / (1 - (y + diff) / height)
+    end
 
     if zoomAnimGrp then
         zoomAnimGrp = zoomAnimGrp:Stop()
@@ -278,7 +302,8 @@ function Addon.ZoomTo(minX, minY, maxX, maxY, subLevel, fromSub)
     subLevel, fromSub = subLevel or currSub, fromSub or currSub
     if subLevel ~= currSub then
         MDT:SetCurrentSubLevel(subLevel)
-        MDT:UpdateMap(true)
+        MDT:UpdateMap(true, true, true)
+        MDT:DungeonEnemies_UpdateSelected()
     end
 
     local diffX, diffY = maxX - minX, maxY - minY
@@ -373,7 +398,91 @@ function Addon.ScrollToPull(n, center)
 end
 
 -- ---------------------------------------
---             Announce
+--                 Fade
+-- ---------------------------------------
+
+function Addon.SetFade(fade)
+    if fade ~= nil then
+        MDTGuideOptions.fade = fade
+    end
+    
+    if Addon.IsActive() and MDTGuideOptions.fade then
+        if not fadeTicker then
+            fadeTicker = C_Timer.NewTicker(0.5, Addon.Fade)
+    
+            for _,f in pairs(Addon.GetHoverFrames()) do
+                f:SetScript("OnEnter", Addon.Fade)
+                f:SetScript("OnLeave", Addon.Fade)
+            end
+
+            Addon.Fade()
+        end
+    elseif fadeTicker then
+        fadeTicker = fadeTicker:Cancel()
+    
+        for _,f in pairs(Addon.GetHoverFrames()) do
+            f:SetScript("OnEnter", nil)
+            f:SetScript("OnLeave", nil)
+        end
+
+        Addon.FadeIn()
+    end
+end
+
+function Addon.Fade(fadeIn)
+    if Addon.MouseIsOver() then
+        Addon.FadeIn()
+    elseif not isFaded then
+        isFaded = true
+        C_Timer.After(0.5, Addon.FadeOut)
+    end
+end
+
+function Addon.FadeIn()
+    if isFaded then
+        isFaded = false
+        Addon.SetAlpha(1)
+    end
+end
+
+function Addon.FadeOut()
+    if isFaded and not Addon.MouseIsOver() then
+        Addon.SetAlpha(MDTGuideOptions.fade)
+    end
+end
+
+function Addon.SetAlpha(alpha, smooth)
+    MDT.main_frame:SetAlpha(alpha)
+
+    local i = 1
+    while _G["MDTPullButton" .. i]  do
+        _G["MDTPullButton" .. i]:SetAlpha(alpha)
+        i = i+1
+    end
+end
+
+function Addon.MouseIsOver()
+    for _,f in pairs(Addon.GetHoverFrames()) do
+       if f:IsMouseOver() then return true end
+    end
+    return false
+end
+
+function Addon.GetHoverFrames()
+    local main = MDT.main_frame
+
+    hoverFrames = hoverFrames or {
+        main,
+        main.topPanel,
+        main.bottomPanel,
+        main.sidePanel
+    }
+
+    return hoverFrames
+end
+
+-- ---------------------------------------
+--                Announce
 -- ---------------------------------------
 
 function Addon.AnnouncePull(n)
@@ -463,7 +572,7 @@ end
 
 function Addon.GetCurrentPull()
     if Addon.IsCurrentInstance() then
-        if Addon.IsBFS() then
+        if Addon.UseRoute() then
             return Addon.GetCurrentPullByRoute()
         else
             return Addon.GetCurrentPullByEnemyForces()
@@ -472,13 +581,16 @@ function Addon.GetCurrentPull()
 end
 
 function Addon.ZoomToCurrentPull(refresh)
-    if Addon.IsBFS() and refresh then
+    if Addon.UseRoute() and refresh then
         Addon.UpdateRoute(true)
     elseif Addon.IsActive() then
-        local n = Addon.GetCurrentPull()
+        local n, pull = Addon.GetCurrentPull()
         if n then
+            local fromSub = MDT:GetCurrentSubLevel()
             MDT:SetSelectionToPull(n)
-            Addon.ScrollToPull(n, true)
+            if MDT:GetCurrentSubLevel() ~= Addon.GetBestSubLevel(pull) then
+                Addon.ZoomToPull(n, fromSub)
+            end
         end
     end
 end
@@ -494,7 +606,7 @@ end
 
 function Addon.ColorEnemies()
     if Addon.IsActive() and Addon.IsCurrentInstance() then
-        if Addon.IsBFS() then
+        if Addon.UseRoute() then
             local n = Addon.GetCurrentPullByRoute()
             if n and n > 0 then
                 Addon.IteratePull(n, function (_, _, cloneId, enemyId)
@@ -530,22 +642,6 @@ end
 
 function Addon.IsInRun()
     return Addon.IsActive() and Addon.IsCurrentInstance() and Addon.GetEnemyForces() and true
-end
-
-function Addon.GetFramesToHide()
-    local main = MDT.main_frame
-
-    frames = frames or {
-        main.bottomPanelString,
-        main.sidePanel.WidgetGroup,
-        main.sidePanel.ProgressBar,
-        main.toolbar.toggleButton,
-        main.maximizeButton,
-        main.HelpButton,
-        main.DungeonSelectionGroup
-    }
-
-    return frames
 end
 
 -- ---------------------------------------
@@ -628,10 +724,6 @@ local OnEvent = function (_, ev, ...)
                     
                     announceBtn:SetPoint("RIGHT", currentPullBtn, "LEFT", -8, 0)
                 end
-
-                -- TODO:DEBUG
-                Addon.currentPullBtn = currentPullBtn
-                Addon.announceBtn = announceBtn
 
                 if MDTGuideActive then
                     MDTGuideActive = false
@@ -728,7 +820,7 @@ local OnEvent = function (_, ev, ...)
                 end
             end
         end
-    elseif ev == "SCENARIO_CRITERIA_UPDATE" and not Addon.IsBFS() then
+    elseif ev == "SCENARIO_CRITERIA_UPDATE" and not Addon.UseRoute() then
         Addon.ZoomToCurrentPull(true)
     end
 end
@@ -757,13 +849,16 @@ function SlashCmdList.MDTG(args)
             Addon.Echo(cmd, "Height set to " .. arg1 .. ".")
         end
     elseif cmd == "route" then
-        arg1 = arg1 or not Addon.BFS and "enable"
-        Addon.BFS = arg1 == "enable"
-        Addon.Echo(cmd, "Route predition " .. (Addon.BFS and "enabled" or "disabled"))
+        Addon.UseRoute(arg1 ~= "disable")
+        Addon.Echo("Route predition", Addon.ROUTE and "enabled" or "disabled")
+    elseif cmd == "fade" then
+        Addon.SetFade(tonumber(arg1) or arg1 ~= "disable" and 0.3)
+        Addon.Echo("Fade", MDTGuideOptions.fade and "enabled" or "disabled")
     else
         Addon.Echo("Usage")
-        print("|cffbbbbbb/mdtg height [height]|r: Adjust the guide window size by setting the height, default is 200.")
-        print("|cffbbbbbb/mdtg route [enable/disable]|r: Enable/Disable/Toggle route estimation.")
-        print("|cffbbbbbb/mdtg|r: Print this help message.")
+        print("|cffcccccc/mdtg height [<height>]|r: Adjust the guide window size by setting the height, default is 200.")
+        print("|cffcccccc/mdtg route [enable/disable]|r: Enable/Disable route estimation.")
+        print("|cffcccccc/mdtg fade [enable/disable/<opacity>]|r: Enable/Disable fading or set opacity (default 0.3).")
+        print("|cffcccccc/mdtg|r: Print this help message.")
     end
 end

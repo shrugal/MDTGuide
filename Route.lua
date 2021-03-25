@@ -1,32 +1,35 @@
 local Name, Addon = ...
 
 -- Use route estimation
-Addon.BFS = false
+Addon.ROUTE = false
 -- # of hops to track back from previous result
-Addon.BFS_TRACK_BACK = 15
+Addon.ROUTE_TRACK_BACK = 15
 -- Distance weight to route
-Addon.BFS_WEIGHT_ROUTE = 0.5
+Addon.ROUTE_WEIGHT_ROUTE = 0.5
 -- Distance weight to a following pull
-Addon.BFS_WEIGHT_FORWARD = 0.5
+Addon.ROUTE_WEIGHT_FORWARD = 0.5
 -- Distance weight to same group but different sublevels
-Addon.BFS_WEIGHT_GROUP = 0.7
+Addon.ROUTE_WEIGHT_GROUP = 0.7
+-- Max difference between the min/max and a given path for it to be considered
+Addon.ROUTE_MAX_LENGTH_DIFF = 10
+Addon.ROUTE_MAX_WEIGHT_DIFF = 3
 -- Max rounds per frame
-Addon.BFS_MAX_FRAME = 15
+Addon.ROUTE_MAX_FRAME = 20
 -- Scale MAX_FRAME with elapsed time
-Addon.BFS_MAX_FRAME_SCALE = 0.5
+Addon.ROUTE_MAX_FRAME_SCALE = 0.3
 -- Total time to spend on route estimation (in s)
-Addon.BFS_MAX_TOTAL = 5
--- Max queue index for new candidates paths
-Addon.BFS_QUEUE_INSERT = 300
--- Max # of path candidates in the queue
-Addon.BFS_QUEUE_MAX = 1000
+Addon.ROUTE_MAX_TOTAL = 5
 
-local queue, weights = {}, {}
-local pulls, groups = {}, {}
+local queue, queueSize, weights = {}, 0, {}
+local maxLength, minWeight = 0, math.huge
+local pulls, groups, portals = {}, {}, {}
 local hits, kills = {}, {}
 local co, rerun, zoom, retry
 
-local bfs = true
+-- DEBUG
+local ignored = 0
+
+local useRoute = true
 
 local debug = Addon.Debug
 
@@ -82,27 +85,44 @@ local function Position(clone)
     return grp and grp.sublevel and grp or clone
 end
 
-local function Distance(a, b)
-    a, b = Position(a), Position(b)
-    local from, to = a.sublevel or 1, b.sublevel or 1
+local function Distance(from, to, forceSub)
+    from, to = Position(from), Position(to)
+    local fromSub, toSub = forceSub or from.sublevel, forceSub or to.sublevel
 
-    if from == to then
-        return math.sqrt(math.pow(a.x - b.x, 2) + math.pow(a.y - b.y, 2))
+    if not fromSub or not toSub or fromSub == toSub then
+        return math.sqrt(math.pow(from.x - to.x, 2) + math.pow(from.y - to.y, 2))
     else
-        local POIs = MDT.mapPOIs[Addon.GetCurrentDungeonId()]
-        local p = Addon.FindWhere(POIs[from], "type", "mapLink", "target", to)
-        local t = p and Addon.FindWhere(POIs[to], "type", "mapLink", "connectionIndex", p.connectionIndex)
-        return t and Distance(a, p) + Distance(t, b) or math.huge
+        local pois = MDT.mapPOIs[Addon.GetCurrentDungeonId()]
+
+        local min = math.huge
+        for _,fromPoi in pairs(pois[fromSub]) do
+            if fromPoi.type == "mapLink" then
+                local i = fromPoi.connectionIndex
+                local fromDist = Distance(from, fromPoi, fromSub)
+                for _,toPoi in pairs(pois[toSub]) do
+                    if toPoi.type == "mapLink" then
+                        local j = toPoi.connectionIndex
+                        local dist = portals[i][j]
+                        if dist and dist < min then
+                            min = math.min(min, fromDist + dist + Distance(toPoi, to, toSub))
+                        end
+                    end
+                end
+            end
+        end
+
+        return min
     end
+
+    return math.huge
 end
 
 local function Weight(path, enemies)
     if path == "" then
         return 0
     elseif not weights[path] then
-        enemies = enemies or Addon.GetCurrentEnemies()
         local parent = Sub(path, 1)
-        local prevWeight, prevLength = Weight(parent), Length(parent)
+        local prevWeight, prevLength = Weight(parent, enemies), Length(parent)
         local prevNode, prev = Last(parent, enemies)
         local prevPull = prevNode and pulls[prevNode]
 
@@ -114,63 +134,97 @@ local function Weight(path, enemies)
 
         -- Weighted by group
         if prev.g and curr.g and prev.g == curr.g then
-            dist = dist * Addon.BFS_WEIGHT_GROUP
+            dist = dist * Addon.ROUTE_WEIGHT_GROUP
         end
 
         -- Weighted by direction
         if currPull then
             if not prevPull then
-                dist = dist * Addon.BFS_WEIGHT_ROUTE
+                dist = dist * Addon.ROUTE_WEIGHT_ROUTE
             else
-                local diff = abs(currPull - prevPull) / #Addon.GetCurrentPulls()
-                local forward = currPull > prevPull and Addon.BFS_WEIGHT_FORWARD or 1
+                local diff = math.max(0.1, abs(currPull - prevPull) / #Addon.GetCurrentPulls())
+                local forward = currPull > prevPull and Addon.ROUTE_WEIGHT_FORWARD or 1
                 dist = dist * diff * forward
             end
         end
 
-        -- weights[path] = prevWeight + (dist - prevWeight) / (prevLength + 1)
-        weights[path] = prevWeight + dist
+        weights[path] = prevWeight + (dist - prevWeight) / (prevLength + 1)
+        -- weights[path] = prevWeight + dist
     end
     return weights[path]
 end
 
-local function Insert(path)
-    local weight = Weight(path)
-    local lft, rgt = 1, #queue+1
+local function CheckPath(path)
+    local length, weight = Length(path), weights[path]
 
-    while rgt > lft do
-        local m = math.floor(lft + (rgt - lft) / 2)
+    local result = length > maxLength - Addon.ROUTE_MAX_LENGTH_DIFF
+        and (length >= maxLength or weight < minWeight + Addon.ROUTE_MAX_WEIGHT_DIFF)
 
-        if weight < Weight(queue[m]) then
-            rgt = m
-        else
-            lft = m+1
-        end
+    if result then
+        maxLength = math.max(maxLength, length)
+        minWeight = math.min(minWeight, weight)
+    else
+        ignored = ignored + 1
     end
 
-    if lft <= Addon.BFS_QUEUE_INSERT then
-        table.insert(queue, lft, path)
-        if queue[Addon.BFS_QUEUE_MAX+1] then
-            table.remove(queue)
-        end
+    return result
+end
+
+local function Enqueue(path)
+    local weight = weights[path]
+
+    queueSize = queueSize + 1
+
+    local i, p = queueSize, math.floor(queueSize/2)
+    while i > 1 and weights[queue[p]] > weight do
+        queue[i] = queue[p]
+        i, p = p, math.floor(p/2)
+    end
+
+    queue[i] = path
+end
+
+local function Dequeue()
+    if queueSize > 0 then
+        local val = queue[1]
+
+        queue[1], queue[queueSize], queueSize = queue[queueSize], nil, queueSize - 1
+        
+        -- Heapify
+        local min, i, l, r = 1
+        repeat
+            i, l, r = min, 2*min, 2*min+1
+            if l <= queueSize and weights[queue[l]] < weights[queue[min]] then 
+                min = l
+            end
+            if r <= queueSize and weights[queue[r]] < weights[queue[min]] then
+                min = r
+            end
+            if min ~= i then
+                queue[i], queue[min] = queue[min], queue[i]
+            end
+        until min == i
+
+        return val
     end
 end
 
-local function DeepSearch(path, enemies)
+local function DeepSearch(path, enemies, grp)
     local enemyId = kills[Length(path)+1]
-    local res
+    local minPath
 
-    if enemies and enemies[enemyId] then
-        for cloneId,clone in pairs(enemies[enemyId].clones) do
+    if grp and grp[enemyId] then
+        for cloneId,clone in pairs(grp[enemyId].clones) do
             local node = Node(enemyId, cloneId)
 
             if not Contains(path, node) then
-                local p = DeepSearch(Path(path, node), enemies)
+                local p = DeepSearch(Path(path, node), enemies, grp)
+                local w = Weight(p, enemies)
 
-                if not res or Weight(p) < Weight(res) then
-                    res = p
+                if not minPath or w < weights[minPath] then
+                    minPath = p
 
-                    if enemies.sublevel then
+                    if grp.sublevel then
                         break
                     end
                 end
@@ -178,7 +232,7 @@ local function DeepSearch(path, enemies)
         end
     end
     
-    return res or path
+    return minPath or path
 end
 
 local function WideSearch(path, enemies, grps)
@@ -190,14 +244,14 @@ local function WideSearch(path, enemies, grps)
             local node = Node(enemyId, cloneId)
 
             if not Contains(path, node) then
-                local p = DeepSearch(Path(path, node), groups[clone.g])
-                local w = Weight(p)
+                local p = DeepSearch(Path(path, node), enemies, groups[clone.g])
+                local w = Weight(p, enemies)
 
                 if w < math.huge then
                     found = true
                     if not clone.g then
-                        Insert(p)
-                    elseif not grps[clone.g] or w < Weight(grps[clone.g]) then
+                        Enqueue(p)
+                    elseif not grps[clone.g] or w < weights[grps[clone.g]] then
                         grps[clone.g] = p
                     end
                 end
@@ -206,7 +260,7 @@ local function WideSearch(path, enemies, grps)
     end
 
     for _,p in pairs(grps) do
-        Insert(p)
+        Enqueue(p)
     end
     
     return found
@@ -218,54 +272,67 @@ function Addon.CalculateRoute()
     local t, i, n, grps = GetTime(), 1, 1, {}
 
     -- Start route
-    local start = Sub(MDTGuideRoute, Addon.BFS_TRACK_BACK)
-    queue[1] = start
+    local start = Sub(MDTGuideRoute, Addon.ROUTE_TRACK_BACK)
     weights[start] = 0
+    Enqueue(start)
 
     while true do
         local total = GetTime() - t
 
         -- Limit runtime
-        if total >= Addon.BFS_MAX_TOTAL then
-            print("|cff00bbbb[MDTGuide]|r Route calculation took too long, switching to enemy forces mode!")
-            bfs, rerun = false, false
+        if total >= Addon.ROUTE_MAX_TOTAL then
+            Addon.Echo(nil, "Route calculation took too long, switching to enemy forces mode!")
+            useRoute, rerun = false, false
             break
-        elseif i > Addon.BFS_MAX_FRAME * (1 - total * Addon.BFS_MAX_FRAME_SCALE / Addon.BFS_MAX_TOTAL) then
+        elseif i > Addon.ROUTE_MAX_FRAME * (1 - total * Addon.ROUTE_MAX_FRAME_SCALE / Addon.ROUTE_MAX_TOTAL) then
             i = 1
             coroutine.yield()
         end
 
-        local path = table.remove(queue, 1)
+        local path = Dequeue()
 
-        -- Failure or success
+        -- Failure
         if not path then
-            print("|cff00bbbb[MDTGuide]|r Route calculation didn't work, switching to enemy forces mode!")
-            bfs, rerun = false, false
+            Addon.Echo(nil, "Route calculation didn't work, switching to enemy forces mode!")
+            useRoute, rerun = false, false
             break
-        elseif Length(path) == #kills then
+        end
+        
+        local length = Length(path)
+        
+        -- Success
+        if length == #kills then
             MDTGuideRoute = path
             break
         end
 
         -- Find next paths
-        local found = WideSearch(path, enemies, grps)
+        if CheckPath(path) then
+            local found = WideSearch(path, enemies, grps)
 
-        -- Skip current enemy if no path was found
-        if not found then
-            table.remove(kills, length+1)
-            table.insert(queue, 1, path)
+            -- Skip current enemy if no path was found
+            if not found then
+                table.remove(kills, length+1)
+                Enqueue(path)
+            end
+
+            wipe(grps)
         end
 
         i, n = i+1, n+1
-        wipe(grps)
     end
 
+    debug("LENGTH", Length(MDTGuideRoute))
+    debug("WEIGHT", weights[MDTGuideRoute])
     debug("LOOPS", n)
     debug("TIME", GetTime() - t)
-    debug("QUEUE", #queue)
+    debug("QUEUE", queueSize)
+    debug("IGNORED", ignored)
 
     wipe(queue)
     wipe(weights)
+    queueSize, maxLength, minWeight = 0, 0, math.huge
+    ignored = 0
 
     Addon.ColorEnemies()
 
@@ -282,8 +349,15 @@ end
 --                 State
 -- ---------------------------------------
 
-function Addon.IsBFS()
-    return Addon.BFS and bfs
+function Addon.UseRoute(val)
+    if val ~= nil then
+        Addon.ROUTE = val
+        if val == true then
+            useRoute = true
+        end
+    end
+
+    return Addon.ROUTE and useRoute
 end
 
 function Addon.UpdateRoute(z)
@@ -294,7 +368,8 @@ function Addon.UpdateRoute(z)
             rerun = true
         else
             co = coroutine.create(Addon.CalculateRoute)
-            coroutine.resume(co)
+            local ok, err = coroutine.resume(co)
+            if not ok then error(err) end
         end
     end
 end
@@ -312,7 +387,7 @@ function Addon.ClearKills()
     wipe(hits)
     wipe(kills)
     MDTGuideRoute = ""
-    bfs = true
+    useRoute = true
 end
 
 function Addon.GetCurrentPullByRoute()
@@ -321,11 +396,19 @@ function Addon.GetCurrentPullByRoute()
         local node = Last(path)
         local n = pulls[node]
         if n then
-            return Addon.IteratePull(n, function (_, _, cloneId, enemyId, pull)
+            local a, b = Addon.IteratePull(n, function (_, _, cloneId, enemyId, pull)
                 if not Contains(path, Node(enemyId, cloneId)) then
                     return n, pull
                 end
-            end) or n + 1
+            end)
+
+            if a then
+                return a, b
+            else
+                local currPulls = Addon.GetCurrentPulls()
+                if n < #currPulls then n = n + 1 end
+                return n, currPulls[n]
+            end
         end
         path = path:sub(1, -node:len() - 3)
     end
@@ -333,29 +416,9 @@ end
 
 function Addon.SetDungeon()
     wipe(pulls)
-    wipe(groups)
 
-    Addon.IteratePulls(function (clone, _, cloneId, enemyId, _, pullId)
-        pulls[Node(enemyId, cloneId)] = pullId
-
-        if clone.g then
-            groups[clone.g] = groups[clone.g] or { x = 0, y = 0 }
-            local grp = groups[clone.g]
-
-            grp[enemyId] = grp[enemyId] or { clones = {} }
-            grp[enemyId].clones[cloneId] = clone
-
-            if grp.sublevel == nil or grp.sublevel == clone.sublevel then
-                grp.sublevel = clone.sublevel
-                grp.x = grp.x + (clone.x - grp.x) / #grp
-                grp.y = grp.y + (clone.y - grp.y) / #grp
-            else
-                grp.sublevel = false
-                grp.x, grp.y = nil
-            end
-        end
-    end)
-
+    Addon.BuildGroups()
+    Addon.BuildPortals()
     Addon.UpdateRoute()
 end
 
@@ -363,6 +426,70 @@ function Addon.SetInstanceDungeon(dungeon)
     Addon.currentDungeon = dungeon
     Addon.ClearKills()
     Addon.UpdateRoute()
+end
+
+function Addon.BuildGroups()
+    wipe(groups)
+
+    Addon.IteratePulls(function (clone, _, cloneId, enemyId, _, pullId)
+        pulls[Node(enemyId, cloneId)] = pullId
+
+        if clone.g then
+            groups[clone.g] = groups[clone.g] or { x = 0, y = 0, length = 0 }
+            local grp = groups[clone.g]
+
+            grp[enemyId] = grp[enemyId] or { clones = {} }
+            grp[enemyId].clones[cloneId] = clone
+            grp.length = grp.length + 1
+
+            if grp.sublevel == nil or grp.sublevel == clone.sublevel then
+                grp.sublevel = clone.sublevel
+                grp.x = grp.x + (clone.x - grp.x) / grp.length
+                grp.y = grp.y + (clone.y - grp.y) / grp.length
+            else
+                grp.sublevel = false
+                grp.x, grp.y = nil
+            end
+        end
+    end)
+end
+
+function Addon.BuildPortals()
+    local start = GetTime()
+    local levels = MDT.mapPOIs[Addon.GetCurrentDungeonId()]
+    local numLevels = #levels
+
+    wipe(portals)
+
+    -- Build cost matrix
+    for level,pois in pairs(levels) do
+        for _,poi in pairs(pois) do
+            if poi.type == "mapLink" then
+                local i = poi.connectionIndex
+                portals[i] = portals[i] or {}
+                for _,poi2 in pairs(pois) do
+                    if poi2.type == "mapLink" then
+                        local j = poi2.connectionIndex
+                        portals[i][j] = i == j and 0 or math.min(portals[i][j] or math.huge, Distance(poi, poi2))
+                    end
+                end
+            end
+        end
+    end
+
+    local n = #portals
+
+    -- Find shortest paths
+    for k=1,n do
+        for i=1,n do
+            for j=1,n do
+                local path = (portals[i][k] or math.huge) + (portals[k][j] or math.huge)
+                if path < (portals[i][j] or math.huge) then
+                   portals[i][j] = path
+                end
+            end
+        end
+    end
 end
 
 -- ---------------------------------------
@@ -409,7 +536,7 @@ local OnEvent = function (_, ev, ...)
             if hits[destGUID] then
                 hits[destGUID] = nil
                 local npcId = Addon.GetNPCId(destGUID)
-                if Addon.AddKill(npcId) and Addon.IsBFS() then
+                if Addon.AddKill(npcId) and Addon.UseRoute() then
                     Addon.ZoomToCurrentPull(true)
                 end
             end
@@ -426,7 +553,8 @@ end
 -- Resume route calculation
 local OnUpdate = function ()
     if co and coroutine.status(co) == "suspended" then
-        coroutine.resume(co)
+        local ok, err = coroutine.resume(co)
+        if not ok then error(err) end
     end
 
     if retry then
