@@ -1,3 +1,10 @@
+Version 1.05
+- Added smooth transitions between pulls
+- Added option to fade out window when mouse isn't over it
+- Speed up route estimation by adding a min-heap for the path queue as well as length and weight limits
+- Improved route estimation accuracy by switching weights to a rolling average
+- Fixed switching sublevels manually in guide mode
+
 Version 1.04
 - Updated toc version for patch 9.0.5
 - Added button to zoom to current pull

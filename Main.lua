@@ -6,7 +6,7 @@ MDTGuideRoute = ""
 MDTGuideOptions = {
     height = 200,
     widthSide = 200,
-    zoom = 1.8,
+    zoom = 1,
     fade = false
 }
 
@@ -16,6 +16,7 @@ Addon.RATIO = Addon.WIDTH / Addon.HEIGHT
 Addon.MIN_HEIGHT = 150
 Addon.MIN_Y, Addon.MAX_Y = 180, 270
 Addon.MIN_X, Addon.MAX_X = Addon.MIN_Y * Addon.RATIO, Addon.MAX_Y * Addon.RATIO
+Addon.ZOOM = 1.8
 Addon.ZOOM_BORDER = 15
 Addon.COLOR_CURR = {0.13, 1, 1}
 Addon.COLOR_DEAD = {0.55, 0.13, 0.13}
@@ -53,7 +54,7 @@ function Addon.EnableGuideMode(noZoom)
 
     -- Zoom
     if not noZoom and main.mapPanelFrame:GetScale() > 1 then
-        Addon.ZoomBy(MDTGuideOptions.zoom)
+        Addon.ZoomBy(Addon.ZOOM)
     end
 
     -- Adjust top panel
@@ -146,7 +147,7 @@ function Addon.DisableGuideMode()
     f:SetPoint("BOTTOMLEFT", main.sidePanel, "BOTTOMLEFT", 0, 30)
 
     -- Reset size
-    Addon.ZoomBy(1 / MDTGuideOptions.zoom)
+    Addon.ZoomBy(1 / Addon.ZOOM)
     MDT:GetDB().nonFullscreenScale = 1
     MDT:Minimize()
     main:SetMinResize(Addon.WIDTH * 0.75, Addon.HEIGHT * 0.75)
@@ -241,7 +242,7 @@ function Addon.Zoom(s, x, y, smooth)
     -- Don't go out of bounds
     local scale = MDT:GetScale()
     local width, height = Addon.WIDTH * scale, Addon.HEIGHT * scale
-   
+
     if x > width * (1 - 1/s) then
         local diff = x + width * (1/s - 1)
         x, y, s = x + diff, y + diff * (1 / Addon.RATIO), 1 / (1 - (x + diff) / width)
@@ -254,7 +255,7 @@ function Addon.Zoom(s, x, y, smooth)
     if zoomAnimGrp then
         zoomAnimGrp = zoomAnimGrp:Stop()
     end
-    
+
     if smooth then
         local fromS = map:GetScale()
         local fromX = scroll:GetHorizontalScroll()
@@ -296,7 +297,7 @@ end
 
 function Addon.ZoomTo(minX, minY, maxX, maxY, subLevel, fromSub)
     local main = MDT.main_frame
-            
+
     -- Change sublevel if required
     local currSub = MDT:GetCurrentSubLevel()
     subLevel, fromSub = subLevel or currSub, fromSub or currSub
@@ -311,60 +312,61 @@ function Addon.ZoomTo(minX, minY, maxX, maxY, subLevel, fromSub)
     -- Ensure min rect size
     local scale = MDT:GetScale()
     local sizeScale = scale * Addon.GetDungeonScale()
-    local sizeX, sizeY = Addon.MIN_X * sizeScale, Addon.MIN_Y * sizeScale
-    
+    local sizeX = Addon.MIN_X * sizeScale * MDTGuideOptions.zoom
+    local sizeY = Addon.MIN_Y * sizeScale * MDTGuideOptions.zoom
+
     if diffX < sizeX then
         minX, maxX, diffX = minX - (sizeX - diffX)/2, maxX + (sizeX - diffX)/2, sizeX
-    end    
+    end
     if diffY < sizeY then
         minY, maxY, diffY = minY - (sizeY - diffY)/2, maxY + (sizeY - diffY)/2, sizeY
     end
-   
-   -- Get zoom and scroll values
-   local s = min(15, Addon.WIDTH / diffX, Addon.HEIGHT / diffY)
-   local scrollX = minX + diffX/2 - Addon.WIDTH/s/2
-   local scrollY = -maxY + diffY/2 - Addon.HEIGHT/s/2
-    
+
+    -- Get zoom and scroll values
+    local s = min(15, Addon.WIDTH / diffX, Addon.HEIGHT / diffY)
+    local scrollX = minX + diffX/2 - Addon.WIDTH/s/2
+    local scrollY = -maxY + diffY/2 - Addon.HEIGHT/s/2
+
     Addon.Zoom(s, scrollX * scale, scrollY * scale, subLevel == fromSub)
 end
 
 function Addon.ZoomToPull(n, fromSub)
     n = n or MDT:GetCurrentPull()
-    local pulls = Addon.GetCurrentPulls() 
+    local pulls = Addon.GetCurrentPulls()
     local pull = pulls[n]
 
     local dungeonScale = Addon.GetDungeonScale()
     local sizeScale = MDT:GetScale() * dungeonScale
     local sizeX, sizeY = Addon.MAX_X * sizeScale, Addon.MAX_Y * sizeScale
-    
+
     if pull then
         local bestSub = Addon.GetBestSubLevel(pull)
 
         if bestSub then
             -- Get rect to zoom to
             local minX, minY, maxX, maxY = Addon.GetPullRect(n, bestSub)
-            
+
             -- Border
             minX, minY, maxX, maxY = Addon.ExtendRect(minX, minY, maxX, maxY, Addon.ZOOM_BORDER * dungeonScale)
-            
+
             -- Try to include prev/next pulls
             for i=1,3 do
                 for p=-i,i,2*i do
                     pull = pulls[n+p]
-                    
+
                     if pull then
                         local pMinX, pMinY, pMaxX, pMaxY = Addon.CombineRects(minX, minY, maxX, maxY, Addon.GetPullRect(pull, bestSub))
-                        
+
                         if pMinX and pMaxX - pMinX <= sizeX and pMaxY - pMinY <= sizeY then
                             minX, minY, maxX, maxY = pMinX, pMinY, pMaxX, pMaxY
                         end
                     end
                 end
             end
-            
+
             -- Zoom to rect
             Addon.ZoomTo(minX, minY, maxX, maxY, bestSub, fromSub)
-            
+
             -- Scroll pull list
             Addon.ScrollToPull(n)
         end
@@ -405,11 +407,11 @@ function Addon.SetFade(fade)
     if fade ~= nil then
         MDTGuideOptions.fade = fade
     end
-    
+
     if Addon.IsActive() and MDTGuideOptions.fade then
         if not fadeTicker then
             fadeTicker = C_Timer.NewTicker(0.5, Addon.Fade)
-    
+
             for _,f in pairs(Addon.GetHoverFrames()) do
                 f:SetScript("OnEnter", Addon.Fade)
                 f:SetScript("OnLeave", Addon.Fade)
@@ -419,7 +421,7 @@ function Addon.SetFade(fade)
         end
     elseif fadeTicker then
         fadeTicker = fadeTicker:Cancel()
-    
+
         for _,f in pairs(Addon.GetHoverFrames()) do
             f:SetScript("OnEnter", nil)
             f:SetScript("OnLeave", nil)
@@ -496,7 +498,7 @@ function Addon.AnnouncePull(n)
 
     Addon.Chat("---------- Pull " .. n .. " ----------")
 
-    for enemyId,clones in pairs(pull) do        
+    for enemyId,clones in pairs(pull) do
         local enemy = enemies[enemyId]
         if #clones > 0 and enemy and enemy.name then
             Addon.Chat(#clones .. "x " .. enemy.name)
@@ -644,6 +646,13 @@ function Addon.IsInRun()
     return Addon.IsActive() and Addon.IsCurrentInstance() and Addon.GetEnemyForces() and true
 end
 
+function Addon.MigrateOptions()
+    if not MDTGuideOptions.version then
+        MDTGuideOptions.zoom = 1
+        MDTGuideOptions.version = 1
+    end
+end
+
 -- ---------------------------------------
 --              Events/Hooks
 -- ---------------------------------------
@@ -657,6 +666,8 @@ local OnEvent = function (_, ev, ...)
     if ev == "ADDON_LOADED" then
         if ... == Name then
             Frame:UnregisterEvent("ADDON_LOADED")
+
+            Addon.MigrateOptions()
 
             -- Hook showing interface
             hooksecurefunc(MDT, "ShowInterface", function ()
@@ -691,7 +702,7 @@ local OnEvent = function (_, ev, ...)
                         GameTooltip:Show()
                     end)
                     currentPullBtn:SetScript("OnLeave", function () GameTooltip:Hide() end)
-                    
+
                     currentPullBtn:SetPoint("RIGHT", toggleBtn, "LEFT", 0, 0.5)
                 end
 
@@ -721,7 +732,7 @@ local OnEvent = function (_, ev, ...)
                         GameTooltip:Show()
                     end)
                     announceBtn:SetScript("OnLeave", function () GameTooltip:Hide() end)
-                    
+
                     announceBtn:SetPoint("RIGHT", currentPullBtn, "LEFT", -8, 0)
                 end
 
@@ -851,14 +862,23 @@ function SlashCmdList.MDTG(args)
     elseif cmd == "route" then
         Addon.UseRoute(arg1 ~= "disable")
         Addon.Echo("Route predition", Addon.ROUTE and "enabled" or "disabled")
+    elseif cmd == "zoom" then
+        arg1 = tonumber(arg1)
+        if not arg1 then
+            Addon.Echo(cmd, "First parameter must be a number.")
+        else
+            MDTGuideOptions.zoom = arg1
+            Addon.Echo("Zoom level", "Set to " .. arg1)
+        end
     elseif cmd == "fade" then
         Addon.SetFade(tonumber(arg1) or arg1 ~= "disable" and 0.3)
         Addon.Echo("Fade", MDTGuideOptions.fade and "enabled" or "disabled")
     else
         Addon.Echo("Usage")
-        print("|cffcccccc/mdtg height [<height>]|r: Adjust the guide window size by setting the height, default is 200.")
+        print("|cffcccccc/mdtg height <height>|r: Adjust the guide window size by setting the height. (current: " .. math.floor(MDTGuideOptions.height) .. ", default: 200)")
         print("|cffcccccc/mdtg route [enable/disable]|r: Enable/Disable route estimation.")
-        print("|cffcccccc/mdtg fade [enable/disable/<opacity>]|r: Enable/Disable fading or set opacity (default 0.3).")
+        print("|cffcccccc/mdtg zoom <zoom-level>|r: Set minimum zoom level, higher values mean more zoomed-out. (current: " .. MDTGuideOptions.zoom .. ", default: 1)")
+        print("|cffcccccc/mdtg fade [enable/disable/<opacity>]|r: Enable/Disable fading or set opacity. (current: " .. (MDTGuideOptions.fade or "off") .. ", default: 0.3)")
         print("|cffcccccc/mdtg|r: Print this help message.")
     end
 end
