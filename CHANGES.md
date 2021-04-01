@@ -1,1 +1,2 @@
-- Added `zoom` command to scale minimum and maximum zoom size
+- Added `zoom` command to scale minimum and maximum zoom 
+- Changed command parameters a bit
