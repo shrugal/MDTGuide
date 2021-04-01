@@ -6,7 +6,8 @@ MDTGuideRoute = ""
 MDTGuideOptions = {
     height = 200,
     widthSide = 200,
-    zoom = 1,
+    zoomMin = 1,
+    zoomMax = 1,
     fade = false
 }
 
@@ -312,8 +313,8 @@ function Addon.ZoomTo(minX, minY, maxX, maxY, subLevel, fromSub)
     -- Ensure min rect size
     local scale = MDT:GetScale()
     local sizeScale = scale * Addon.GetDungeonScale()
-    local sizeX = Addon.MIN_X * sizeScale * MDTGuideOptions.zoom
-    local sizeY = Addon.MIN_Y * sizeScale * MDTGuideOptions.zoom
+    local sizeX = Addon.MIN_X * sizeScale * MDTGuideOptions.zoomMin
+    local sizeY = Addon.MIN_Y * sizeScale * MDTGuideOptions.zoomMin
 
     if diffX < sizeX then
         minX, maxX, diffX = minX - (sizeX - diffX)/2, maxX + (sizeX - diffX)/2, sizeX
@@ -337,7 +338,8 @@ function Addon.ZoomToPull(n, fromSub)
 
     local dungeonScale = Addon.GetDungeonScale()
     local sizeScale = MDT:GetScale() * dungeonScale
-    local sizeX, sizeY = Addon.MAX_X * sizeScale, Addon.MAX_Y * sizeScale
+    local sizeX = Addon.MAX_X * sizeScale * MDTGuideOptions.zoomMax
+    local sizeY = Addon.MAX_Y * sizeScale * MDTGuideOptions.zoomMax
 
     if pull then
         local bestSub = Addon.GetBestSubLevel(pull)
@@ -648,7 +650,9 @@ end
 
 function Addon.MigrateOptions()
     if not MDTGuideOptions.version then
-        MDTGuideOptions.zoom = 1
+        MDTGuideOptions.zoom = nil
+        MDTGuideOptions.zoomMin = 1
+        MDTGuideOptions.zoomMax = 1
         MDTGuideOptions.version = 1
     end
 end
@@ -847,38 +851,53 @@ Frame:RegisterEvent("SCENARIO_CRITERIA_UPDATE")
 SLASH_MDTG1 = "/mdtg"
 
 function SlashCmdList.MDTG(args)
-    local cmd, arg1 = strsplit(' ', args)
+    local cmd, arg1, arg2 = strsplit(' ', args)
 
+    -- Height
     if cmd == "height" then
         arg1 = tonumber(arg1)
         if not arg1 then
-            Addon.Echo(cmd, "First parameter must be a number.")
-        else
-            Addon.ReloadGuideMode(function ()
-                MDTGuideOptions.height = tonumber(arg1)
-            end)
-            Addon.Echo(cmd, "Height set to " .. arg1 .. ".")
+            return Addon.Echo(cmd, "First parameter must be a number.")
         end
+
+        Addon.ReloadGuideMode(function ()
+            MDTGuideOptions.height = tonumber(arg1)
+        end)
+        Addon.Echo(cmd, "Height set to " .. arg1 .. ".")
+
+    -- Route
     elseif cmd == "route" then
         Addon.UseRoute(arg1 ~= "disable")
         Addon.Echo("Route predition", Addon.ROUTE and "enabled" or "disabled")
+
+    -- Zoom
     elseif cmd == "zoom" then
         arg1 = tonumber(arg1)
         if not arg1 then
-            Addon.Echo(cmd, "First parameter must be a number.")
-        else
-            MDTGuideOptions.zoom = arg1
-            Addon.Echo("Zoom level", "Set to " .. arg1)
+            return Addon.Echo(cmd, "First parameter must be a number.")
         end
+        arg2 = not arg2 and arg1 or tonumber(arg2)
+        if not arg2 then
+            return Addon.Echo(cmd, "Second parameter must be a number if set.")
+        end
+
+        MDTGuideOptions.zoomMin = arg1
+        MDTGuideOptions.zoomMax = arg2
+        Addon.Echo("Zoom scale", "Set to " .. arg1 .. " / " .. arg2)
+
+    -- Fade
     elseif cmd == "fade" then
         Addon.SetFade(tonumber(arg1) or arg1 ~= "disable" and 0.3)
         Addon.Echo("Fade", MDTGuideOptions.fade and "enabled" or "disabled")
+
+    -- Help
     else
         Addon.Echo("Usage")
         print("|cffcccccc/mdtg height <height>|r: Adjust the guide window size by setting the height. (current: " .. math.floor(MDTGuideOptions.height) .. ", default: 200)")
         print("|cffcccccc/mdtg route [enable/disable]|r: Enable/Disable route estimation.")
-        print("|cffcccccc/mdtg zoom <zoom-level>|r: Set minimum zoom level, higher values mean more zoomed-out. (current: " .. MDTGuideOptions.zoom .. ", default: 1)")
+        print("|cffcccccc/mdtg zoom <min-or-both> [<max>]|r: Scale default minimum and maximum zoom size. (current: " .. MDTGuideOptions.zoomMin .. " / " .. MDTGuideOptions.zoomMax .. ", default: 1 / 1)")
         print("|cffcccccc/mdtg fade [enable/disable/<opacity>]|r: Enable/Disable fading or set opacity. (current: " .. (MDTGuideOptions.fade or "off") .. ", default: 0.3)")
         print("|cffcccccc/mdtg|r: Print this help message.")
+        print("Legend: <...> = number, [...] = optional, .../... = either or")
     end
 end
