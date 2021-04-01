@@ -1,7 +1,5 @@
 local Name, Addon = ...
 
--- Use route estimation
-Addon.ROUTE = false
 -- # of hops to track back from previous result
 Addon.ROUTE_TRACK_BACK = 15
 -- Distance weight to route
@@ -351,13 +349,13 @@ end
 
 function Addon.UseRoute(val)
     if val ~= nil then
-        Addon.ROUTE = val
+        MDTGuideOptions.route = val
         if val == true then
             useRoute = true
         end
     end
 
-    return Addon.ROUTE and useRoute
+    return MDTGuideOptions.route and useRoute
 end
 
 function Addon.UpdateRoute(z)

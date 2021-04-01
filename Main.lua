@@ -8,7 +8,8 @@ MDTGuideOptions = {
     widthSide = 200,
     zoomMin = 1,
     zoomMax = 1,
-    fade = false
+    fade = false,
+    route = false
 }
 
 Addon.WIDTH = 840
@@ -653,6 +654,7 @@ function Addon.MigrateOptions()
         MDTGuideOptions.zoom = nil
         MDTGuideOptions.zoomMin = 1
         MDTGuideOptions.zoomMax = 1
+        MDTGuideOptions.route = false
         MDTGuideOptions.version = 1
     end
 end
@@ -867,8 +869,8 @@ function SlashCmdList.MDTG(args)
 
     -- Route
     elseif cmd == "route" then
-        Addon.UseRoute(arg1 ~= "disable")
-        Addon.Echo("Route predition", Addon.ROUTE and "enabled" or "disabled")
+        Addon.UseRoute(arg1 ~= "off")
+        Addon.Echo("Route predition", MDTGuideOptions.route and "enabled" or "disabled")
 
     -- Zoom
     elseif cmd == "zoom" then
@@ -887,16 +889,16 @@ function SlashCmdList.MDTG(args)
 
     -- Fade
     elseif cmd == "fade" then
-        Addon.SetFade(tonumber(arg1) or arg1 ~= "disable" and 0.3)
+        Addon.SetFade(tonumber(arg1) or arg1 ~= "off" and 0.3)
         Addon.Echo("Fade", MDTGuideOptions.fade and "enabled" or "disabled")
 
     -- Help
     else
         Addon.Echo("Usage")
         print("|cffcccccc/mdtg height <height>|r: Adjust the guide window size by setting the height. (current: " .. math.floor(MDTGuideOptions.height) .. ", default: 200)")
-        print("|cffcccccc/mdtg route [enable/disable]|r: Enable/Disable route estimation.")
+        print("|cffcccccc/mdtg route [on/off]|r: Enable/Disable route estimation. (current: " .. (MDTGuideOptions.route and "on" or "off") .. ", default: off)")
         print("|cffcccccc/mdtg zoom <min-or-both> [<max>]|r: Scale default minimum and maximum zoom size. (current: " .. MDTGuideOptions.zoomMin .. " / " .. MDTGuideOptions.zoomMax .. ", default: 1 / 1)")
-        print("|cffcccccc/mdtg fade [enable/disable/<opacity>]|r: Enable/Disable fading or set opacity. (current: " .. (MDTGuideOptions.fade or "off") .. ", default: 0.3)")
+        print("|cffcccccc/mdtg fade [on/off/<opacity>]|r: Enable/Disable fading or set opacity. (current: " .. (MDTGuideOptions.fade or "off") .. ", default: 0.3)")
         print("|cffcccccc/mdtg|r: Print this help message.")
         print("Legend: <...> = number, [...] = optional, .../... = either or")
     end
