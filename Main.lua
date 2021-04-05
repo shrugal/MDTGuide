@@ -16,7 +16,7 @@ Addon.WIDTH = 840
 Addon.HEIGHT = 555
 Addon.RATIO = Addon.WIDTH / Addon.HEIGHT
 Addon.MIN_HEIGHT = 150
-Addon.MIN_Y, Addon.MAX_Y = 180, 270
+Addon.MIN_Y, Addon.MAX_Y = 200, 270
 Addon.MIN_X, Addon.MAX_X = Addon.MIN_Y * Addon.RATIO, Addon.MAX_Y * Addon.RATIO
 Addon.ZOOM = 1.8
 Addon.ZOOM_BORDER = 15
@@ -65,6 +65,10 @@ function Addon.EnableGuideMode(noZoom)
     f:SetPoint("BOTTOMLEFT", main, "TOPLEFT")
     f:SetPoint("BOTTOMRIGHT", main, "TOPRIGHT", MDTGuideOptions.widthSide, 0)
     f:SetHeight(25)
+    f = main.topPanelLogo
+    f:SetWidth(16)
+    f:SetHeight(16)
+
 
     -- Adjust bottom panel
     main.bottomPanel:SetHeight(20)
@@ -126,6 +130,9 @@ function Addon.DisableGuideMode()
     f:SetPoint("BOTTOMLEFT", main, "TOPLEFT")
     f:SetPoint("BOTTOMRIGHT", main, "TOPRIGHT")
     f:SetHeight(30)
+    f = main.topPanelLogo
+    f:SetWidth(24)
+    f:SetHeight(24)
 
     -- Reset bottom panel
     main.bottomPanel:SetHeight(30)
@@ -298,8 +305,6 @@ function Addon.ZoomBy(factor)
 end
 
 function Addon.ZoomTo(minX, minY, maxX, maxY, subLevel, fromSub)
-    local main = MDT.main_frame
-
     -- Change sublevel if required
     local currSub = MDT:GetCurrentSubLevel()
     subLevel, fromSub = subLevel or currSub, fromSub or currSub
@@ -353,7 +358,7 @@ function Addon.ZoomToPull(n, fromSub)
             minX, minY, maxX, maxY = Addon.ExtendRect(minX, minY, maxX, maxY, Addon.ZOOM_BORDER * dungeonScale)
 
             -- Try to include prev/next pulls
-            for i=1,3 do
+            for i=1,4 do
                 for p=-i,i,2*i do
                     pull = pulls[n+p]
 
@@ -649,16 +654,6 @@ function Addon.IsInRun()
     return Addon.IsActive() and Addon.IsCurrentInstance() and Addon.GetEnemyForces() and true
 end
 
-function Addon.MigrateOptions()
-    if not MDTGuideOptions.version then
-        MDTGuideOptions.zoom = nil
-        MDTGuideOptions.zoomMin = 1
-        MDTGuideOptions.zoomMax = 1
-        MDTGuideOptions.route = false
-        MDTGuideOptions.version = 1
-    end
-end
-
 -- ---------------------------------------
 --              Events/Hooks
 -- ---------------------------------------
@@ -847,7 +842,7 @@ Frame:RegisterEvent("ADDON_LOADED")
 Frame:RegisterEvent("SCENARIO_CRITERIA_UPDATE")
 
 -- ---------------------------------------
---                  CLI
+--                Options
 -- ---------------------------------------
 
 SLASH_MDTG1 = "/mdtg"
@@ -897,9 +892,19 @@ function SlashCmdList.MDTG(args)
         Addon.Echo("Usage")
         print("|cffcccccc/mdtg height <height>|r: Adjust the guide window size by setting the height. (current: " .. math.floor(MDTGuideOptions.height) .. ", default: 200)")
         print("|cffcccccc/mdtg route [on/off]|r: Enable/Disable route estimation. (current: " .. (MDTGuideOptions.route and "on" or "off") .. ", default: off)")
-        print("|cffcccccc/mdtg zoom <min-or-both> [<max>]|r: Scale default minimum and maximum zoom size. (current: " .. MDTGuideOptions.zoomMin .. " / " .. MDTGuideOptions.zoomMax .. ", default: 1 / 1)")
+        print("|cffcccccc/mdtg zoom <min-or-both> [<max>]|r: Scale default min and max visible area size when zooming. (current: " .. MDTGuideOptions.zoomMin .. " / " .. MDTGuideOptions.zoomMax .. ", default: 1 / 1)")
         print("|cffcccccc/mdtg fade [on/off/<opacity>]|r: Enable/Disable fading or set opacity. (current: " .. (MDTGuideOptions.fade or "off") .. ", default: 0.3)")
         print("|cffcccccc/mdtg|r: Print this help message.")
         print("Legend: <...> = number, [...] = optional, .../... = either or")
+    end
+end
+
+function Addon.MigrateOptions()
+    if not MDTGuideOptions.version then
+        MDTGuideOptions.zoom = nil
+        MDTGuideOptions.zoomMin = 1
+        MDTGuideOptions.zoomMax = 1
+        MDTGuideOptions.route = false
+        MDTGuideOptions.version = 1
     end
 end

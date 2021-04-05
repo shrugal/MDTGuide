@@ -1,3 +1,7 @@
+Version 1.06
+- Added `zoom` command to scale minimum and maximum zoom 
+- Changed command parameters a bit
+
 Version 1.05
 - Added smooth transitions between pulls
 - Added option to fade out window when mouse isn't over it
