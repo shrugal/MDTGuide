@@ -1,3 +1,1 @@
-- Reduced size of new top bar logo in guide mode
-- Increased minimum visible area when zooming a bit
-- Try to get more groups into view when zooming out
+- Updated ToC version for patch 9.1

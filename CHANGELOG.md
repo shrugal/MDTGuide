@@ -1,3 +1,8 @@
+Version 1.07
+- Reduced size of new top bar logo in guide mode
+- Increased minimum visible area when zooming a bit
+- Try to get more groups into view when zooming out
+
 Version 1.06
 - Added `zoom` command to scale minimum and maximum zoom 
 - Changed command parameters a bit
